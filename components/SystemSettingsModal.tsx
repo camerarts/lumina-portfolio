@@ -81,10 +81,15 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   // Fetch data on open
   useEffect(() => {
     if (isOpen) {
-       // Fetch Presets
+       // Fetch Presets and set defaults for batch edit
        const fetchPresets = async () => {
            const p = await client.getPresets();
-           if (p) setPresets(p);
+           if (p) {
+               setPresets(p);
+               // Default filling for Batch Edit tab fields
+               setBatchCamera(prev => prev || (p.cameras && p.cameras[0]) || '');
+               setBatchLens(prev => prev || (p.lenses && p.lenses[0]) || '');
+           }
        };
        fetchPresets();
     }
