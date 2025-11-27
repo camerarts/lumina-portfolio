@@ -35,7 +35,7 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         return;
       }
 
-      const locName = (photo.exif.location && photo.exif.location.trim() !== '') ? photo.exif.location : '未知地点';
+      const locName = (photo.exif.location && photo.exif.location.trim() !== '' && photo.exif.location !== 'Unknown') ? photo.exif.location : '未知地点';
 
       // Find existing group nearby
       const existingGroup = groups.find(g => 
