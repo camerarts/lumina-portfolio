@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown } from 'lucide-react';
+import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
@@ -11,40 +11,25 @@ import { ProgressBar } from './components/ProgressBar';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES } from './types';
 import { client } from './api/client';
 
-// Helper: Calculate distance between two coordinates in km (Haversine formula)
+// Helper: Calculate distance
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Radius of the earth in km
+  const R = 6371; 
   const dLat = deg2rad(lat2 - lat1);
   const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c; // Distance in km
-  return d;
+  return R * c;
 }
-
-function deg2rad(deg: number) {
-  return deg * (Math.PI / 180);
-}
+function deg2rad(deg: number) { return deg * (Math.PI / 180); }
 
 const PAGE_SIZE = 9;
-
-// New Tabs Definition
 const FEED_TABS = ['精选', '最新', '随览', '附近', '远方'];
 
 const App: React.FC = () => {
-  // Initialize photos as empty array, will fetch from API
   const [photos, setPhotos] = useState<Photo[]>([]);
-  
-  // Loading States
   const [globalLoading, setGlobalLoading] = useState(false);
-  
-  // Dynamic Categories
   const [customCategories, setCustomCategories] = useState<string[]>(DEFAULT_CATEGORIES);
 
-  // Data fetching
   useEffect(() => {
     const fetchInitData = async () => {
       try {
@@ -54,9 +39,7 @@ const App: React.FC = () => {
             client.getCategories()
         ]);
         setPhotos(photosData);
-        if (catsData && catsData.length > 0) {
-            setCustomCategories(catsData);
-        }
+        if (catsData && catsData.length > 0) setCustomCategories(catsData);
       } catch (error) {
         console.error("Failed to fetch initial data:", error);
       } finally {
@@ -67,135 +50,61 @@ const App: React.FC = () => {
   }, []);
 
   const [activeCategory, setActiveCategory] = useState<string>(Category.ALL);
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false); // Dropdown State
-
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('最新');
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
-
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminToken, setAdminToken] = useState<string>(''); // Store the token
+  const [adminToken, setAdminToken] = useState<string>('');
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  
-  // Admin Modes - Unified Manage Mode
   const [isManageMode, setIsManageMode] = useState(false);
   const [photoToEdit, setPhotoToEdit] = useState<Photo | null>(null);
-
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
-  const [scrolled, setScrolled] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
-  
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
-
-  // Sorting & Location States
-  const [shuffleTrigger, setShuffleTrigger] = useState(0); // Trigger to force re-shuffle
+  const [shuffleTrigger, setShuffleTrigger] = useState(0);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
-
   const isDark = theme === 'dark';
 
-  // Check for saved login
   useEffect(() => {
     const savedToken = localStorage.getItem('lumina_token');
-    if (savedToken) {
-      setAdminToken(savedToken);
-      setIsAdmin(true);
-    }
+    if (savedToken) { setAdminToken(savedToken); setIsAdmin(true); }
   }, []);
   
-  // Close dropdown on click outside
   useEffect(() => {
     const closeDropdown = () => setIsCategoryOpen(false);
     if(isCategoryOpen) window.addEventListener('click', closeDropdown);
     return () => window.removeEventListener('click', closeDropdown);
   }, [isCategoryOpen]);
 
-  const handleLoginSuccess = (token: string) => {
-    setAdminToken(token);
-    setIsAdmin(true);
-    localStorage.setItem('lumina_token', token);
-  };
+  const handleLoginSuccess = (token: string) => { setAdminToken(token); setIsAdmin(true); localStorage.setItem('lumina_token', token); };
+  const handleLogout = () => { setIsAdmin(false); setIsManageMode(false); setAdminToken(''); localStorage.removeItem('lumina_token'); };
 
-  const handleLogout = () => {
-    setIsAdmin(false);
-    setIsManageMode(false);
-    setAdminToken('');
-    localStorage.removeItem('lumina_token');
-  };
-
-  // Background Component based on Theme
+  // === Minimal Flat Background ===
   const Background = () => (
-    <div className={`fixed inset-0 overflow-hidden pointer-events-none -z-10 transition-colors duration-1000 ease-liquid ${isDark ? 'bg-[#050505]' : 'bg-[#f8f8f8]'}`}>
-      {isDark ? (
-        <>
-          <div className="absolute top-[-20%] left-[-10%] w-[80vw] h-[80vw] bg-indigo-950/20 rounded-full blur-[120px] animate-blob mix-blend-screen" />
-          <div className="absolute bottom-[-20%] right-[-10%] w-[80vw] h-[80vw] bg-purple-950/10 rounded-full blur-[120px] animate-blob animation-delay-4000 mix-blend-screen" />
-          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] brightness-100 contrast-150"></div>
-        </>
-      ) : (
-        <>
-          <div className="absolute top-[-10%] left-[-10%] w-[70vw] h-[70vw] bg-gray-200/40 rounded-full blur-[100px] animate-blob" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[70vw] h-[70vw] bg-slate-200/30 rounded-full blur-[100px] animate-blob animation-delay-2000" />
-          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.015] brightness-100 contrast-100"></div>
-        </>
-      )}
+    <div className={`fixed inset-0 overflow-hidden pointer-events-none -z-10 transition-colors duration-1000 ${isDark ? 'bg-[#0a0a0a]' : 'bg-[#fafafa]'}`}>
     </div>
   );
 
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 20); // Sensitive scroll trigger
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Handle Tab Click - Special logic for Random and Location
   const handleTabClick = (tab: string) => {
-    // Reset view mode to grid when clicking other tabs, unless user toggles map explicitly
     if (viewMode === 'map') setViewMode('grid');
-
-    // Trigger loading effect
     setGlobalLoading(true);
-    setTimeout(() => setGlobalLoading(false), 800);
-
-    if (tab === '随览') {
-      // Always trigger re-shuffle even if already active
-      setShuffleTrigger(prev => prev + 1);
-    }
-    
-    // Only fetch location if clicking Nearby/Faraway and we don't have it yet
+    setTimeout(() => setGlobalLoading(false), 500);
+    if (tab === '随览') setShuffleTrigger(prev => prev + 1);
     if ((tab === '附近' || tab === '远方') && !userLocation) {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
-          (position) => {
-            setUserLocation({
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            });
-            // Location fetched successfully
-          },
-          (error) => {
-            let msg = "无法获取您的地理位置。";
-            if (error.code === error.PERMISSION_DENIED) msg = "您拒绝了位置权限，无法按距离排序。";
-            else if (error.code === error.POSITION_UNAVAILABLE) msg = "位置信息不可用。";
-            else if (error.code === error.TIMEOUT) msg = "获取位置超时。";
-            
-            console.warn("Geolocation error:", error.message);
-            alert(msg);
-          },
-          { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+          (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          (err) => alert("无法获取位置信息"), { timeout: 5000 }
         );
-      } else {
-        alert("您的浏览器不支持地理位置功能。");
       }
     }
-    
-    // Set active tab immediately
     setActiveTab(tab);
   };
 
-  // Filter & Sort Logic
   const filteredPhotos = useMemo(() => {
     let result = photos.filter(p => {
       if (activeCategory === Category.ALL) return true;
@@ -205,482 +114,222 @@ const App: React.FC = () => {
     });
 
     switch (activeTab) {
-      case '精选':
-        // Filter for 4 or 5 stars, then sort by rating desc
-        result = result.filter(p => (p.rating || 0) >= 4);
-        result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        break;
-        
-      case '最新':
-        // API default sort is CreatedAt DESC, so no action needed for 'Latest'
-        break;
-        
-      case '随览':
-        // Random shuffle - depends on shuffleTrigger to re-run on every click
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const trigger = shuffleTrigger; // Dependency
-        result = [...result].sort(() => Math.random() - 0.5);
-        break;
-        
+      case '精选': result = result.filter(p => (p.rating || 0) >= 4).sort((a, b) => (b.rating || 0) - (a.rating || 0)); break;
+      case '随览': const t = shuffleTrigger; result = [...result].sort(() => Math.random() - 0.5); break;
       case '附近':
       case '远方':
         if (userLocation) {
           result = result.sort((a, b) => {
-            // Safety check for exif existence
-            const latA = a.exif?.latitude;
-            const lngA = a.exif?.longitude;
-            const latB = b.exif?.latitude;
-            const lngB = b.exif?.longitude;
-
-            const distA = (typeof latA === 'number' && typeof lngA === 'number') 
-              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latA, lngA)
-              : 99999; // Put photos without location at the end
-            const distB = (typeof latB === 'number' && typeof lngB === 'number') 
-              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latB, lngB)
-              : 99999;
-            
+            const distA = (a.exif?.latitude && a.exif?.longitude) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, a.exif.latitude, a.exif.longitude) : 99999;
+            const distB = (b.exif?.latitude && b.exif?.longitude) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, b.exif.latitude, b.exif.longitude) : 99999;
             return activeTab === '附近' ? distA - distB : distB - distA;
           });
         }
         break;
-        
-      default:
-        break;
+      default: break; 
     }
-
     return result;
   }, [photos, activeCategory, activeTab, shuffleTrigger, userLocation]);
 
-  // Progressive Loading Logic
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-    window.scrollTo(0,0);
-  }, [activeCategory, activeTab, shuffleTrigger, viewMode]); // Reset when reshuffled or view changed
+  useEffect(() => { setVisibleCount(PAGE_SIZE); window.scrollTo(0,0); }, [activeCategory, activeTab, shuffleTrigger, viewMode]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredPhotos.length));
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [activeCategory, activeTab, shuffleTrigger, filteredPhotos.length]);
-
-  useEffect(() => {
-    if (viewMode === 'map') return; // Don't scroll load in map view
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredPhotos.length));
-        }
-      },
-      { threshold: 0.1 }
-    );
+    if (viewMode === 'map') return;
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredPhotos.length));
+    }, { threshold: 0.1 });
     if (loadMoreRef.current) observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
-  }, [filteredPhotos.length, visibleCount, viewMode]); 
+  }, [filteredPhotos.length, viewMode]); 
 
   const visiblePhotos = filteredPhotos.slice(0, visibleCount);
 
   const handleUpdatePhoto = (newPhoto: Photo) => {
     setPhotos(prev => {
-        // If it's an update, replace the existing one
         const index = prev.findIndex(p => p.id === newPhoto.id);
-        if (index >= 0) {
-            const updated = [...prev];
-            updated[index] = newPhoto;
-            return updated;
-        }
-        // If it's new, prepend
+        if (index >= 0) { const u = [...prev]; u[index] = newPhoto; return u; }
         return [newPhoto, ...prev];
     });
-    
-    // Reset filters to show new photo (only if new)
-    if (!photoToEdit) {
-        setActiveCategory(Category.ALL);
-        setActiveTab('最新');
-        setViewMode('grid');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('最新'); setViewMode('grid'); window.scrollTo(0,0); }
   };
 
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
-    // Critical: Stop propagation instantly
-    e.stopPropagation();
-    e.preventDefault();
-
-    // Use setTimeout to ensure the UI has registered the click event 
-    setTimeout(async () => {
-      const isConfirmed = window.confirm('确定要永久删除这张照片吗？');
-      if (isConfirmed) {
-        try {
-          setGlobalLoading(true);
-          await client.deletePhoto(photoId, adminToken);
-          setPhotos(prev => prev.filter(p => p.id !== photoId));
-          if (selectedPhoto?.id === photoId) {
-            setSelectedPhoto(null);
-          }
-        } catch (err) {
-          alert("删除失败，请检查网络连接");
-          console.error(err);
-        } finally {
-          setGlobalLoading(false);
-        }
-      }
-    }, 10);
+    e.stopPropagation(); e.preventDefault();
+    if (window.confirm('确定删除?')) {
+        await client.deletePhoto(photoId, adminToken);
+        setPhotos(prev => prev.filter(p => p.id !== photoId));
+    }
   };
 
-  const handlePhotoClick = (photo: Photo) => {
-    // If management mode is active, prevent opening the modal
-    if (isManageMode) return;
-    
-    setSelectedPhoto(photo);
-  };
-
-  const handleNextPhoto = () => {
+  const handlePhotoClick = (photo: Photo) => { if (!isManageMode) setSelectedPhoto(photo); };
+  const handleNext = () => {
     if (!selectedPhoto) return;
     setSlideDirection('right');
-    const currentIndex = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
-    if (currentIndex < filteredPhotos.length - 1) {
-      setSelectedPhoto(filteredPhotos[currentIndex + 1]);
-    }
+    const idx = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
+    if (idx < filteredPhotos.length - 1) setSelectedPhoto(filteredPhotos[idx + 1]);
   };
-
-  const handlePrevPhoto = () => {
+  const handlePrev = () => {
     if (!selectedPhoto) return;
     setSlideDirection('left');
-    const currentIndex = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
-    if (currentIndex > 0) {
-      setSelectedPhoto(filteredPhotos[currentIndex - 1]);
-    }
+    const idx = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
+    if (idx > 0) setSelectedPhoto(filteredPhotos[idx - 1]);
   };
 
-  const currentIndex = selectedPhoto ? filteredPhotos.findIndex(p => p.id === selectedPhoto.id) : -1;
-  const hasNext = currentIndex < filteredPhotos.length - 1;
-  const hasPrev = currentIndex > 0;
-
-  const textPrimary = isDark ? "text-slate-100" : "text-slate-900";
-  const textSecondary = isDark ? "text-white/60" : "text-black/60";
-
-  // Combine system tabs and custom categories for filter bar
   const displayCategories = [Category.ALL, ...customCategories, Category.HORIZONTAL, Category.VERTICAL];
-  
+  const textPrimary = isDark ? "text-white" : "text-black";
+  const textSecondary = isDark ? "text-white/50" : "text-black/50";
+
   return (
     <div className={`min-h-screen font-sans selection:bg-gray-500/30 ${textPrimary}`}>
       <Background />
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
-      {/* Hero Section */}
-      {viewMode !== 'map' && (
-        <header className="pt-12 pb-8 px-6 max-w-7xl mx-auto text-center">
-          <div className="animate-fade-in flex flex-col items-center">
-            <h1 className="text-5xl md:text-8xl font-serif font-thin tracking-[0.2em] leading-tight mb-2 uppercase mix-blend-overlay opacity-90">
-              Lumina
-            </h1>
-            <div className={`w-24 h-px mb-6 ${isDark ? 'bg-white/20' : 'bg-black/20'}`}></div>
-            <p className={`text-[10px] md:text-xs tracking-[0.4em] uppercase font-sans mb-0 ${textSecondary}`}>
-              Light & Shadow Collection
-            </p>
-          </div>
-        </header>
-      )}
-
-      {/* Unified Sticky Utility Bar */}
-      <div className={`sticky top-0 z-40 transition-all duration-500 ease-liquid
-        ${isDark ? 'bg-black/40' : 'bg-white/60'}
-        backdrop-blur-2xl border-b 
-        ${scrolled ? (isDark ? 'border-white/5 shadow-2xl shadow-black/10' : 'border-white/20 shadow-xl shadow-black/5') : 'border-transparent'}
-      `}>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          
-          {/* Left: Text Tabs */}
-          <div className="flex gap-6 overflow-x-auto no-scrollbar items-center">
-             {FEED_TABS.map(tab => (
-               <button
-                 key={tab}
-                 onClick={() => handleTabClick(tab)}
-                 className={`text-sm md:text-base font-serif transition-all duration-500 ease-liquid whitespace-nowrap relative py-2 px-1 hover:scale-110 active:scale-95
-                    ${activeTab === tab 
-                      ? (isDark ? 'text-white font-semibold' : 'text-black font-semibold')
-                      : (isDark ? 'text-white/40 hover:text-white' : 'text-black/40 hover:text-black')
-                    }
-                 `}
-               >
-                 {tab}
-                 {activeTab === tab && (
-                   <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isDark ? 'bg-white' : 'bg-black'}`} />
-                 )}
-               </button>
-             ))}
-             
-             {/* Map Toggle */}
-             <button
-               onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')}
-               className={`p-2 rounded-full transition-all duration-500 ease-liquid flex items-center justify-center hover:scale-110 active:scale-95
-                 ${viewMode === 'map' 
-                   ? (isDark ? 'text-white bg-white/10' : 'text-black bg-black/5') 
-                   : (isDark ? 'text-white/30 hover:text-white' : 'text-black/30 hover:text-black')
-                 }
-               `}
-               title={viewMode === 'map' ? "切换回网格" : "世界地图模式"}
-             >
-               <Globe size={18} strokeWidth={1.5} />
-             </button>
-          </div>
-
-          {/* Right: Filters, Theme, Admin */}
-          <div className="flex items-center justify-between md:justify-end gap-3 z-50">
-            
-            {/* Category Dropdown (Replacing Horizontal List) */}
-            <div className="relative">
-                <button
-                   onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }}
-                   className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium tracking-wide transition-all duration-300 ease-liquid
-                     ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-black/5 text-black hover:bg-black/10'}
-                   `}
-                >
-                   {activeCategory}
-                   <ChevronDown size={14} className={`transition-transform duration-300 ${isCategoryOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {/* Dropdown Menu */}
-                <div 
-                  className={`absolute top-full right-0 mt-2 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-xl shadow-2xl border backdrop-blur-xl animate-fade-in origin-top-right transition-all
-                     ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible pointer-events-none'}
-                     ${isDark ? 'bg-black/80 border-white/10' : 'bg-white/80 border-black/5'}
-                  `}
-                >
-                   {displayCategories.map(cat => (
-                       <button
-                          key={cat}
-                          onClick={() => setActiveCategory(cat)}
-                          className={`w-full text-left px-4 py-2 text-xs transition-colors
-                             ${activeCategory === cat 
-                                ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black')
-                                : (isDark ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-black/70 hover:bg-black/5 hover:text-black')
-                             }
-                          `}
-                       >
-                           {cat}
-                       </button>
-                   ))}
-                </div>
-            </div>
-
-            {/* Divider */}
-            <div className={`w-px h-6 mx-1 flex-shrink-0 ${isDark ? 'bg-white/10' : 'bg-black/10'}`} />
-
-            {/* Theme Toggle */}
-            <button 
-              onClick={() => setTheme(isDark ? 'light' : 'dark')}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 flex-shrink-0
-                ${isDark ? 'text-white/60 hover:bg-white/10 hover:text-white' : 'text-black/60 hover:bg-black/5 hover:text-black'}
-              `}
-            >
-              {isDark ? <Moon size={16} strokeWidth={1.5} /> : <Sun size={16} strokeWidth={1.5} />}
-            </button>
-
-            {/* Admin / Login */}
-            {isAdmin ? (
-               <div className="flex items-center gap-2 flex-shrink-0">
-                 {/* Manage Mode */}
-                 <button
-                   onClick={() => {
-                     if (!isManageMode && viewMode === 'map') setViewMode('grid');
-                     setIsManageMode(!isManageMode);
-                   }}
-                   className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isManageMode ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30' : (isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5')}`}
-                   title="管理模式 (编辑/删除)"
-                 >
-                   <Pencil size={16} strokeWidth={1.5} />
-                 </button>
-                 
-                 {/* Upload */}
-                 <button 
-                  onClick={() => { setPhotoToEdit(null); setIsUploadOpen(true); }}
-                  className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5'}`}
-                  title="上传图片"
-                >
-                  <Plus size={18} strokeWidth={1.5} />
-                </button>
-
-                {/* Settings */}
-                <button
-                   onClick={() => setIsSettingsOpen(true)}
-                   className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5'}`}
-                   title="设置"
-                 >
-                   <Cog size={16} strokeWidth={1.5} />
-                 </button>
-
-                {/* Logout */}
-                <button
-                   onClick={handleLogout}
-                   className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5'}`}
-                   title="退出登录"
-                 >
-                   <LogOut size={16} strokeWidth={1.5} />
-                 </button>
-               </div>
-            ) : (
-              <button 
-                onClick={() => setIsLoginOpen(true)} 
-                className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 flex-shrink-0
-                  ${isDark ? 'text-white/60 hover:bg-white/10 hover:text-white' : 'text-black/60 hover:bg-black/5 hover:text-black'}
-                `}
+      {/* === Floating Dynamic Island Navigation === */}
+      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in w-full max-w-2xl px-4">
+          <div className={`
+              w-full h-14 rounded-full flex items-center justify-between px-2 pl-6 shadow-2xl backdrop-blur-xl transition-all duration-500
+              ${isDark ? 'bg-black/80 border border-white/10' : 'bg-white/80 border border-black/5'}
+          `}>
+              {/* Logo / Home */}
+              <div 
+                onClick={() => { setActiveTab('最新'); setActiveCategory(Category.ALL); setViewMode('grid'); window.scrollTo({top:0, behavior:'smooth'}); }}
+                className="font-serif text-lg tracking-widest cursor-pointer select-none"
               >
-                <Settings size={16} strokeWidth={1.5} />
-              </button>
-            )}
+                  LUMINA
+              </div>
+
+              {/* Center Tabs (Desktop) */}
+              <div className="hidden md:flex items-center gap-1 absolute left-1/2 -translate-x-1/2">
+                  {FEED_TABS.map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => handleTabClick(tab)}
+                        className={`px-3 py-1.5 rounded-full text-xs transition-all ${activeTab === tab ? (isDark ? 'bg-white text-black font-medium' : 'bg-black text-white font-medium') : 'opacity-50 hover:opacity-100'}`}
+                    >
+                        {tab}
+                    </button>
+                  ))}
+              </div>
+
+              {/* Right Controls */}
+              <div className="flex items-center gap-2">
+                  
+                  {/* Category Dropdown */}
+                  <div className="relative">
+                        <button onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-black/5 hover:bg-black/10'}`}>
+                            {activeCategory === Category.ALL ? '分类' : activeCategory}
+                            <ChevronDown size={12} className={`transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        <div className={`absolute top-full right-0 mt-3 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-xl shadow-xl border backdrop-blur-xl p-1 transition-all origin-top-right ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'} ${isDark ? 'bg-black/90 border-white/10' : 'bg-white/90 border-black/5'}`}>
+                            {displayCategories.map(cat => (
+                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${activeCategory === cat ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black') : 'opacity-70 hover:opacity-100 hover:bg-white/5'}`}>
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+                   </div>
+                   
+                   {/* Map Toggle */}
+                   <button onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${viewMode === 'map' ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : 'opacity-50 hover:opacity-100'}`}>
+                       <Globe size={14} />
+                   </button>
+
+                   {/* Admin Toggle */}
+                   {isAdmin ? (
+                        <div className="flex items-center gap-2 border-l pl-2 ml-1 border-gray-500/20">
+                            <button onClick={() => setIsManageMode(!isManageMode)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isManageMode ? 'bg-blue-500 text-white' : 'opacity-50 hover:opacity-100'}`} title="管理"><Pencil size={14} /></button>
+                            <button onClick={() => {setPhotoToEdit(null); setIsUploadOpen(true);}} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="上传"><Plus size={16} /></button>
+                            <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="设置"><Cog size={14} /></button>
+                            <button onClick={handleLogout} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="退出"><LogOut size={14} /></button>
+                        </div>
+                   ) : (
+                        <button onClick={() => setIsLoginOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors"><Settings size={14} /></button>
+                   )}
+                   
+                   {/* Theme */}
+                   <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors">
+                       {isDark ? <Moon size={14} /> : <Sun size={14} />}
+                   </button>
+              </div>
           </div>
-        </div>
+          
+          {/* Mobile Tabs Row (Below Pill) */}
+          <div className="md:hidden mt-4 flex justify-center gap-4 overflow-x-auto pb-2 no-scrollbar">
+               {FEED_TABS.map(tab => (
+                 <button key={tab} onClick={() => handleTabClick(tab)} className={`text-xs uppercase tracking-widest transition-colors ${activeTab === tab ? (isDark ? 'text-white border-b border-white' : 'text-black border-b border-black') : 'opacity-40'}`}>
+                     {tab}
+                 </button>
+               ))}
+          </div>
       </div>
 
       {/* Main Content Area */}
-      <main className={`
-        ${viewMode === 'map' 
-          ? "w-full h-[calc(100vh-65px)] relative" // Full screen map mode
-          : "px-2 md:px-6 py-8 max-w-7xl mx-auto min-h-[60vh]" // Normal grid mode
-        }
-      `}>
-        
+      <main className={`pt-24 md:pt-32 pb-12 px-4 md:px-8 max-w-[1600px] mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
-           <div className="w-full h-full">
-             <MapView 
-               photos={filteredPhotos} 
-               theme={theme} 
-               onPhotoClick={handlePhotoClick} 
-               onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)}
-             />
+           <div className="w-full h-[80vh] rounded-3xl overflow-hidden border border-gray-500/10 shadow-2xl">
+             <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
            </div>
         ) : (
           <>
-            <div className="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
+            <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6">
               {visiblePhotos.map((photo) => (
-                <div 
-                  key={photo.id} 
-                  className={`break-inside-avoid animate-fade-in relative group-container mb-4 z-0 hover:z-10 transition-all duration-500 ease-liquid`}
-                >
-                  <GlassCard 
-                    theme={theme}
-                    flat={true}
-                    square={true}
-                    hoverEffect={!isManageMode} // Disable hover effect in manage mode to stabilize buttons
-                    className={`group h-full relative ${isManageMode ? 'cursor-default' : 'cursor-zoom-in'}`} 
-                    onClick={() => handlePhotoClick(photo)}
-                  >
-                    <div className="relative overflow-hidden">
-                      <img 
-                        src={photo.url} 
-                        alt={photo.title} 
-                        className={`w-full h-auto object-cover transform transition-transform duration-700 ease-liquid ${isManageMode ? '' : 'group-hover:scale-105'}`}
-                        loading="lazy"
-                      />
-                      
-                      {/* Minimal Overlay */}
-                      {!isManageMode && (
-                        <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4`}>
-                          <p className="text-white font-serif text-lg font-medium translate-y-4 group-hover:translate-y-0 transition-transform duration-500 ease-liquid">{photo.title}</p>
-                          <p className="text-white/70 text-xs uppercase tracking-wider translate-y-4 group-hover:translate-y-0 transition-transform duration-500 ease-liquid delay-75">{photo.category}</p>
-                        </div>
-                      )}
+                <div key={photo.id} className="break-inside-avoid animate-fade-in group relative mb-6">
+                    {/* Flat Card Design */}
+                    <div 
+                        onClick={() => handlePhotoClick(photo)}
+                        className={`
+                            relative overflow-hidden cursor-zoom-in transition-all duration-500
+                            ${isManageMode ? '' : 'hover:shadow-2xl hover:-translate-y-1'}
+                        `}
+                    >
+                        <img 
+                            src={photo.url} 
+                            alt={photo.title} 
+                            className="w-full h-auto object-cover block"
+                            loading="lazy"
+                        />
+                        
+                        {/* Overlay */}
+                        {!isManageMode && (
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
+                                <p className="text-white font-serif text-lg tracking-wide transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">{photo.title}</p>
+                                <p className="text-white/70 text-xs uppercase tracking-wider mt-1 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 delay-75">{photo.category}</p>
+                            </div>
+                        )}
+                        
+                        {/* Manage Overlay */}
+                        {isManageMode && (
+                           <div className="absolute inset-0 bg-black/10 flex items-start justify-between p-3">
+                               <button onClick={(e) => { e.stopPropagation(); setPhotoToEdit(photo); setIsUploadOpen(true); }} className="bg-white text-black p-2 rounded-full hover:scale-110 transition-transform shadow-lg"><Pencil size={14} /></button>
+                               <button onClick={(e) => handleDeletePhoto(e, photo.id)} className="bg-red-500 text-white p-2 rounded-full hover:scale-110 transition-transform shadow-lg"><Trash2 size={14} /></button>
+                           </div>
+                        )}
                     </div>
-                  </GlassCard>
-                  
-                  {/* Manage Mode Interaction Overlay */}
-                  {isManageMode && (
-                    <div className="absolute inset-0 z-[50] bg-black/20 backdrop-blur-[2px] border-2 border-dashed border-white/30 flex items-start justify-between p-2 pointer-events-auto transition-all duration-300 animate-fade-in">
-                      {/* Top Left: Edit */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setPhotoToEdit(photo);
-                          setIsUploadOpen(true);
-                        }}
-                        className="bg-blue-500/90 text-white p-2.5 rounded-full shadow-lg hover:scale-110 active:scale-95 transition-transform duration-300 cursor-pointer backdrop-blur-sm"
-                        title="编辑"
-                      >
-                        <Pencil size={14} />
-                      </button>
-
-                      {/* Top Right: Delete */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeletePhoto(e, photo.id)}
-                        className="bg-red-500/90 text-white p-2.5 rounded-full shadow-lg hover:scale-110 active:scale-95 transition-transform duration-300 cursor-pointer backdrop-blur-sm"
-                        title="删除"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
             
-            {/* Scroll Sentinel */}
-            <div ref={loadMoreRef} className="h-20 w-full flex items-center justify-center pointer-events-none opacity-0">
-              Loading...
-            </div>
-
+            <div ref={loadMoreRef} className="h-20 w-full opacity-0 pointer-events-none" />
+            
             {filteredPhotos.length === 0 && (
-              <div className={`text-center py-20 ${textSecondary}`}>
-                <p>暂无图片，请登录上传。</p>
+              <div className={`text-center py-32 flex flex-col items-center justify-center opacity-40`}>
+                  <AlignLeft size={48} strokeWidth={0.5} className="mb-4" />
+                  <p className="font-serif text-xl">暂无相关作品</p>
               </div>
             )}
           </>
         )}
       </main>
 
-      {/* Footer */}
-      {viewMode !== 'map' && (
-        <footer className={`border-t py-12 text-center text-[10px] uppercase tracking-[0.2em] font-light ${isDark ? 'border-white/5 text-white/20' : 'border-black/5 text-black/20'}`}>
-          <p>© {new Date().getFullYear()} LUMINA. All Rights Reserved.</p>
-        </footer>
-      )}
-
-      {/* Full Screen Photo Modal */}
       <PhotoModal 
-        photo={selectedPhoto} 
-        onClose={() => setSelectedPhoto(null)} 
-        onNext={handleNextPhoto} 
-        onPrev={handlePrevPhoto} 
-        hasNext={hasNext} 
-        hasPrev={hasPrev} 
-        theme={theme} 
-        slideDirection={slideDirection}
-        isAdmin={isAdmin}
-        onUpdatePhoto={handleUpdatePhoto}
+        photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} 
+        onNext={handleNext} onPrev={handlePrev} hasNext={filteredPhotos.findIndex(p => p.id === selectedPhoto?.id) < filteredPhotos.length - 1} hasPrev={filteredPhotos.findIndex(p => p.id === selectedPhoto?.id) > 0} 
+        theme={theme} slideDirection={slideDirection} isAdmin={isAdmin} onUpdatePhoto={handleUpdatePhoto}
       />
-
-      {/* Upload Modal */}
-      <UploadModal 
-        isOpen={isUploadOpen} 
-        onClose={() => { setIsUploadOpen(false); setPhotoToEdit(null); }} 
-        onUpload={handleUpdatePhoto} 
-        theme={theme}
-        editingPhoto={photoToEdit}
-        token={adminToken}
-        categories={customCategories}
-      />
-
-      {/* Login Modal */}
-      <LoginModal
-        isOpen={isLoginOpen}
-        onClose={() => setIsLoginOpen(false)}
-        onLoginSuccess={handleLoginSuccess}
-        theme={theme}
-      />
-
-      {/* Settings Modal - Renamed to SystemSettingsModal */}
-      <SystemSettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        categories={customCategories}
-        onUpdateCategories={setCustomCategories}
-        theme={theme}
-        token={adminToken}
-      />
+      
+      <UploadModal isOpen={isUploadOpen} onClose={() => { setIsUploadOpen(false); setPhotoToEdit(null); }} onUpload={handleUpdatePhoto} theme={theme} editingPhoto={photoToEdit} token={adminToken} categories={customCategories} />
+      <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLoginSuccess={handleLoginSuccess} theme={theme} />
+      <SystemSettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} categories={customCategories} onUpdateCategories={setCustomCategories} theme={theme} token={adminToken} />
     </div>
   );
 };
