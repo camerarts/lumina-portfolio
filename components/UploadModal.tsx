@@ -289,23 +289,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [uploadStatus, setUploadStatus] = useState<string>(''); // Text status
   const [presets, setPresets] = useState<Presets>({ cameras: [], lenses: [] });
 
-  // Fetch presets on open
-  useEffect(() => {
-      if (isOpen) {
-          client.getPresets().then(p => {
-              if(p) setPresets(p);
-          });
-      }
-  }, [isOpen]);
-  
-  // Result Overlay State
-  const [resultState, setResultState] = useState<{
-      show: boolean;
-      success: boolean;
-      title: string;
-      message: string;
-  }>({ show: false, success: false, title: '', message: '' });
-
   // -----------------------
   // Single Mode State
   // -----------------------
@@ -326,6 +309,30 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [manualLocation, setManualLocation] = useState(false); // Track if user manually edited location
+
+  // Fetch presets on open and set defaults if not editing
+  useEffect(() => {
+      if (isOpen) {
+          client.getPresets().then(p => {
+              if(p) {
+                  setPresets(p);
+                  // Apply defaults if empty and not editing (Single Mode)
+                  if (!editingPhoto && mode === 'single') {
+                      setCamera(prev => prev || (p.cameras && p.cameras[0]) || '');
+                      setLens(prev => prev || (p.lenses && p.lenses[0]) || '');
+                  }
+              }
+          });
+      }
+  }, [isOpen, editingPhoto, mode]);
+  
+  // Result Overlay State
+  const [resultState, setResultState] = useState<{
+      show: boolean;
+      success: boolean;
+      title: string;
+      message: string;
+  }>({ show: false, success: false, title: '', message: '' });
 
   // -----------------------
   // Batch Mode State
@@ -737,7 +744,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       });
   };
 
-  // Result Modal Content
+  // Result Overlay Content
   const ResultOverlay = () => {
       if (!resultState.show) return null;
       
