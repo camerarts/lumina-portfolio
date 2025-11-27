@@ -37,7 +37,7 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
   const [animDirection, setAnimDirection] = useState<'left' | 'right'>(slideDirection);
   const [isFirstOpen, setIsFirstOpen] = useState(true);
 
-  // Drag State
+  // Drag/Swipe State
   const dragStartX = useRef<number | null>(null);
   const isDragging = useRef(false);
 
@@ -90,22 +90,18 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
     };
   }, [photo, onClose, onNext, onPrev]);
 
-  // Drag Handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    dragStartX.current = e.clientX;
+  // --- Input Handlers (Mouse & Touch) ---
+  
+  const handleStart = (clientX: number) => {
+    dragStartX.current = clientX;
     isDragging.current = true;
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging.current) return;
-    // Optional: Add visual drag offset here if desired
-  };
-
-  const handleMouseUp = (e: React.MouseEvent) => {
+  const handleEnd = (clientX: number) => {
     if (!isDragging.current || dragStartX.current === null) return;
     
-    const deltaX = e.clientX - dragStartX.current;
-    const threshold = 50; // px
+    const deltaX = clientX - dragStartX.current;
+    const threshold = 50; // px to trigger swipe
 
     if (deltaX > threshold && hasPrev) {
       onPrev?.();
@@ -116,17 +112,31 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
     isDragging.current = false;
     dragStartX.current = null;
   };
-  
-  const handleMouseLeave = () => {
-    isDragging.current = false;
-    dragStartX.current = null;
-  };
+
+  // Mouse
+  const handleMouseDown = (e: React.MouseEvent) => handleStart(e.clientX);
+  const handleMouseUp = (e: React.MouseEvent) => handleEnd(e.clientX);
+  const handleMouseLeave = () => { isDragging.current = false; dragStartX.current = null; };
+
+  // Touch
+  const handleTouchStart = (e: React.TouchEvent) => handleStart(e.touches[0].clientX);
+  const handleTouchEnd = (e: React.TouchEvent) => handleEnd(e.changedTouches[0].clientX);
 
   if (!photo || !activePhoto) return null;
+
+  const arrowClass = `
+    absolute top-1/2 -translate-y-1/2 z-[120] p-4 
+    transition-all duration-300
+    opacity-50 hover:opacity-100 hover:scale-110 active:scale-95
+    cursor-pointer outline-none select-none
+    ${isDark ? 'text-white' : 'text-black'}
+  `;
 
   return (
     <div 
       className="fixed inset-0 z-[100] flex flex-col items-center justify-center animate-fade-in overflow-hidden"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
     >
       {/* 1. Solid Background (Grey for Light, Dark for Dark) matching reference */}
       <div className={`absolute inset-0 z-0 transition-colors duration-500
@@ -139,55 +149,41 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
       {/* Top Right Controls */}
       <div className="absolute top-6 right-6 z-[120] flex items-center gap-2">
         <button 
-          className={`p-3 rounded-full transition-all hover:scale-110
-            ${isDark 
-              ? 'text-white/50 hover:text-white' 
-              : 'text-black/40 hover:text-black'
-            }
+          className={`p-3 transition-all hover:scale-110 opacity-60 hover:opacity-100
+            ${isDark ? 'text-white' : 'text-black'}
           `}
         >
           <MoreHorizontal size={24} />
         </button>
         <button 
           onClick={onClose}
-          className={`p-3 rounded-full transition-all hover:rotate-90
-            ${isDark 
-              ? 'text-white/50 hover:text-white' 
-              : 'text-black/40 hover:text-black'
-            }
+          className={`p-3 transition-all hover:rotate-90 opacity-60 hover:opacity-100
+            ${isDark ? 'text-white' : 'text-black'}
           `}
         >
-          <X size={28} strokeWidth={1.5} />
+          <X size={28} strokeWidth={1} />
         </button>
       </div>
 
-      {/* Navigation Arrows - Fixed Position */}
+      {/* Navigation Arrows - Flat Design */}
       {hasPrev && (
-        <button
+        <div
           onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-[120] p-4 rounded-full transition-all group hover:scale-110
-            ${isDark 
-              ? 'text-white/50 hover:text-white' 
-              : 'text-black/50 hover:text-black'
-            }
-          `}
+          className={`${arrowClass} left-2 md:left-8`}
+          title="Previous"
         >
-          <ChevronLeft size={40} strokeWidth={1.5} />
-        </button>
+          <ChevronLeft size={48} strokeWidth={0.7} />
+        </div>
       )}
 
       {hasNext && (
-        <button
+        <div
           onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-[120] p-4 rounded-full transition-all group hover:scale-110
-             ${isDark 
-              ? 'text-white/50 hover:text-white' 
-              : 'text-black/50 hover:text-black'
-            }
-          `}
+          className={`${arrowClass} right-2 md:right-8`}
+          title="Next"
         >
-          <ChevronRight size={40} strokeWidth={1.5} />
-        </button>
+          <ChevronRight size={48} strokeWidth={0.7} />
+        </div>
       )}
 
       {/* Main Content Area */}
@@ -195,7 +191,6 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
         className="relative z-[110] w-full h-full flex flex-col pointer-events-none"
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
         
@@ -232,7 +227,7 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
             className={`absolute inset-0 flex items-center justify-center p-0 md:p-2 will-change-transform
               ${exitingPhoto // Only animate if there is an exiting photo (navigation)
                   ? (animDirection === 'right' ? 'animate-slide-in-right' : 'animate-slide-in-left')
-                  : (isFirstOpen ? 'animate-fade-in' : '') // FIX: Only fade in on first open, otherwise stay static to prevent flicker
+                  : (isFirstOpen ? 'animate-fade-in' : '') 
               }
             `}
             style={{ zIndex: 2 }}
