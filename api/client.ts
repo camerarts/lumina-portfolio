@@ -131,6 +131,24 @@ export const client = {
     return { ...metadata, url: result.url, id: result.id };
   },
 
+  // 批量更新照片元数据
+  async batchUpdatePhotos(ids: string[], updates: any, token: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_ROOT}/batch_update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ids, updates })
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Batch update failed", e);
+      return false;
+    }
+  },
+
   // 删除照片
   async deletePhoto(id: string, token: string): Promise<void> {
     const res = await fetch(`${API_ROOT}/photos/${id}`, {
