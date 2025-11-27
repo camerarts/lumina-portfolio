@@ -3,16 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { X, Lock, ArrowRight, ShieldCheck, KeyRound, Loader2 } from 'lucide-react';
 import { GlassCard } from './GlassCard';
 import { Theme } from '../types';
+import { client } from '../api/client';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLoginSuccess: () => void;
+  onLoginSuccess: (token: string) => void;
   theme: Theme;
 }
-
-// 硬编码密码配置
-const ADMIN_PASSWORD = "1211";
 
 export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess, theme }) => {
   const [password, setPassword] = useState('');
@@ -29,22 +27,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     }
   }, [isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    // 模拟网络延迟，增加一点交互感
-    setTimeout(() => {
-      if (password === ADMIN_PASSWORD) {
-        onLoginSuccess();
+    try {
+      const isValid = await client.verifyPassword(password);
+      
+      if (isValid) {
+        onLoginSuccess(password); // Use password as token since we don't have JWT
         onClose();
       } else {
         setError('密码错误');
         triggerShake();
       }
+    } catch (err) {
+      setError('验证失败，请重试');
+    } finally {
       setIsLoading(false);
-    }, 300);
+    }
   };
 
   const triggerShake = () => {
