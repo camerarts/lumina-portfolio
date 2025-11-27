@@ -1,5 +1,5 @@
 
-import { Category, Photo } from '../types';
+import { Category, Photo, Presets } from '../types';
 
 const API_ROOT = '/api';
 
@@ -43,6 +43,34 @@ export const client = {
                   'Authorization': `Bearer ${token}`
               },
               body: JSON.stringify({ categories })
+          });
+          return res.ok;
+      } catch (e) {
+          return false;
+      }
+  },
+
+  // 获取预设 (相机/镜头)
+  async getPresets(): Promise<Presets | null> {
+      try {
+          const res = await fetch(`${API_ROOT}/presets`);
+          if (!res.ok) return null;
+          return await res.json();
+      } catch (e) {
+          return null;
+      }
+  },
+
+  // 保存预设
+  async savePresets(presets: Presets, token: string): Promise<boolean> {
+      try {
+          const res = await fetch(`${API_ROOT}/presets`, {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(presets)
           });
           return res.ok;
       } catch (e) {
