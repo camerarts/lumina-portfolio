@@ -84,8 +84,9 @@ const App: React.FC = () => {
   const handleLogout = () => { setIsAdmin(false); setIsManageMode(false); setAdminToken(''); localStorage.removeItem('lumina_token'); };
 
   // === Minimal Flat Background ===
+  // Updated to match the requested split design: Very light gray for light mode content, Black for dark mode content.
   const Background = () => (
-    <div className={`fixed inset-0 overflow-hidden pointer-events-none -z-10 transition-colors duration-1000 ${isDark ? 'bg-[#0a0a0a]' : 'bg-[#fafafa]'}`}>
+    <div className={`fixed inset-0 overflow-hidden pointer-events-none -z-10 transition-colors duration-1000 ${isDark ? 'bg-black' : 'bg-[#F9F9F9]'}`}>
     </div>
   );
 
@@ -189,7 +190,8 @@ const App: React.FC = () => {
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
       {/* === Header === */}
-      <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 backdrop-blur-md border-b ${isDark ? 'bg-black/80 border-white/5' : 'bg-white/90 border-black/5'}`}>
+      {/* Updated Colors: Solid White for Light, Dark Gray for Dark. Distinct Divider. */}
+      <header className={`fixed top-0 left-0 right-0 z-50 transition-colors duration-300 border-b ${isDark ? 'bg-[#141414] border-white/5' : 'bg-white border-gray-100'}`}>
           <div className={`${containerMaxWidth} mx-auto ${containerPadding} py-6`}>
               
               {/* Row 1: Logo */}
@@ -229,7 +231,7 @@ const App: React.FC = () => {
                         className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all duration-300 shadow-sm whitespace-nowrap
                             ${viewMode === 'map' 
                                 ? (isDark ? 'bg-white text-black font-medium' : 'bg-black text-white font-medium') 
-                                : (isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/5 hover:bg-black/10 text-black')}
+                                : (isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-gray-100 hover:bg-gray-200 text-black')}
                         `}
                       >
                          {viewMode === 'map' ? <AlignLeft size={16} /> : <Map size={16} />}
@@ -296,6 +298,7 @@ const App: React.FC = () => {
                         className={`
                             relative overflow-hidden cursor-zoom-in transition-all duration-700 ease-out rounded-sm
                             shadow-lg hover:shadow-2xl hover:-translate-y-1 
+                            bg-white 
                             ${isManageMode ? '' : ''}
                         `}
                     >
