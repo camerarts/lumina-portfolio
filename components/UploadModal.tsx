@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle } from 'lucide-react';
-import { Category, Photo, Theme, DEFAULT_CATEGORIES } from '../types';
+import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
 import EXIF from 'exif-js';
 import { client } from '../api/client';
@@ -19,6 +19,7 @@ interface SmartInputProps {
   theme: Theme;
   type?: string;
   readOnly?: boolean;
+  suggestions?: string[]; // New: Dropdown options from backend presets
 }
 
 interface BatchItem {
@@ -157,7 +158,7 @@ const processImageFile = async (file: File): Promise<ProcessedImage> => {
 // Sub-Components
 // ==========================================
 
-const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storageKey, placeholder, theme, type = 'text', readOnly = false }) => {
+const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storageKey, placeholder, theme, type = 'text', readOnly = false, suggestions = [] }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -192,6 +193,9 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
     localStorage.setItem(`lumina_history_${storageKey}`, JSON.stringify(newHistory));
   };
 
+  // Combine Presets (Suggestions) and History, removing duplicates
+  const allOptions = Array.from(new Set([...suggestions, ...history]));
+
   const inputClass = isDark 
     ? "bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-white/30 placeholder:text-white/20" 
     : "bg-black/5 border-black/10 text-black focus:bg-black/5 focus:border-black/30 placeholder:text-black/30";
@@ -213,7 +217,7 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
           className={`w-full border rounded p-2 text-xs focus:outline-none transition-colors ${inputClass} ${type === 'date' ? 'min-h-[34px]' : ''} ${readOnly ? 'cursor-not-allowed opacity-70' : ''}`}
           placeholder={placeholder}
         />
-        {type === 'text' && history.length > 0 && !readOnly && (
+        {type === 'text' && allOptions.length > 0 && !readOnly && (
           <button 
             type="button"
             onClick={() => setShowHistory(!showHistory)}
@@ -224,21 +228,24 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
         )}
       </div>
 
-      {showHistory && history.length > 0 && !readOnly && (
+      {showHistory && allOptions.length > 0 && !readOnly && (
         <div className={`absolute z-50 top-full left-0 right-0 mt-1 border rounded-lg shadow-xl overflow-hidden max-h-40 overflow-y-auto ${dropdownClass}`}>
-          {history.map((item) => (
+          {allOptions.map((item) => (
             <div 
               key={item} 
               className={`flex justify-between items-center px-3 py-2 cursor-pointer group hover:opacity-80`}
               onClick={() => { onChange(item); setShowHistory(false); }}
             >
               <span className="truncate flex-1">{item}</span>
-              <button 
-                onClick={(e) => deleteFromHistory(e, item)}
-                className="opacity-50 hover:opacity-100 text-red-400 hover:text-red-500 p-1 transition-opacity"
-              >
-                <Trash2 size={12} />
-              </button>
+              {/* Only show delete for history items, not managed presets */}
+              {history.includes(item) && !suggestions.includes(item) && (
+                <button 
+                    onClick={(e) => deleteFromHistory(e, item)}
+                    className="opacity-50 hover:opacity-100 text-red-400 hover:text-red-500 p-1 transition-opacity"
+                >
+                    <Trash2 size={12} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -258,6 +265,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>(''); // Text status
+  const [presets, setPresets] = useState<Presets>({ cameras: [], lenses: [] });
+
+  // Fetch presets on open
+  useEffect(() => {
+      if (isOpen) {
+          client.getPresets().then(p => {
+              if(p) setPresets(p);
+          });
+      }
+  }, [isOpen]);
   
   // Result Overlay State
   const [resultState, setResultState] = useState<{
@@ -531,15 +548,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
       const newItems: BatchItem[] = [];
       
-      // We process them one by one to get thumbnails, but we don't upload yet
       for (const file of files) {
-          // Placeholder before processing
           const id = Math.random().toString(36).substr(2, 9);
-          // Just quickly create object, process later or now? 
-          // Better to process immediately to get thumbnail.
           try {
-             // Basic compression for thumbnail preview - maybe lighter?
-             // Re-using processImageFile is fine as it compresses to 2MB max
              const { base64, width, height, exif } = await processImageFile(file);
              newItems.push({
                  id, file, status: 'pending', thumbnail: base64, width, height, exif
@@ -786,8 +797,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                      <h3 className={`text-sm font-medium ${isDark ? 'text-white/80' : 'text-black/80'}`}>EXIF 参数信息</h3>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                     <SmartInput label="相机型号" value={camera} onChange={setCamera} storageKey="camera" theme={theme} />
-                     <SmartInput label="镜头" value={lens} onChange={setLens} storageKey="lens" theme={theme} />
+                     <SmartInput label="相机型号" value={camera} onChange={setCamera} storageKey="camera" theme={theme} suggestions={presets.cameras} />
+                     <SmartInput label="镜头" value={lens} onChange={setLens} storageKey="lens" theme={theme} suggestions={presets.lenses} />
                      <SmartInput label="焦段" value={focalLength} onChange={setFocalLength} storageKey="focal" theme={theme} />
                      <SmartInput label="光圈" value={aperture} onChange={setAperture} storageKey="aperture" theme={theme} />
                      <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
