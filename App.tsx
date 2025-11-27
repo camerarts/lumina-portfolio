@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe } from 'lucide-react';
+import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
 import { LoginModal } from './components/LoginModal';
+import { SettingsModal } from './components/SettingsModal'; // New Component
 import { MapView } from './components/MapView';
 import { ProgressBar } from './components/ProgressBar';
-import { Category, Photo, Theme } from './types';
+import { Category, Photo, Theme, DEFAULT_CATEGORIES } from './types';
 import { client } from './api/client';
 
 // Helper: Calculate distance between two coordinates in km (Haversine formula)
@@ -40,23 +41,32 @@ const App: React.FC = () => {
   // Loading States
   const [globalLoading, setGlobalLoading] = useState(false);
   
+  // Dynamic Categories
+  const [customCategories, setCustomCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+
   // Data fetching
   useEffect(() => {
-    const fetchPhotos = async () => {
+    const fetchInitData = async () => {
       try {
         setGlobalLoading(true);
-        const data = await client.getPhotos(1, 100); // Fetch initial batch
-        setPhotos(data);
+        const [photosData, catsData] = await Promise.all([
+            client.getPhotos(1, 100),
+            client.getCategories()
+        ]);
+        setPhotos(photosData);
+        if (catsData && catsData.length > 0) {
+            setCustomCategories(catsData);
+        }
       } catch (error) {
-        console.error("Failed to fetch photos:", error);
+        console.error("Failed to fetch initial data:", error);
       } finally {
         setGlobalLoading(false);
       }
     };
-    fetchPhotos();
+    fetchInitData();
   }, []);
 
-  const [activeCategory, setActiveCategory] = useState<Category>(Category.ALL);
+  const [activeCategory, setActiveCategory] = useState<string>(Category.ALL);
   const [activeTab, setActiveTab] = useState<string>('最新');
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
 
@@ -64,6 +74,7 @@ const App: React.FC = () => {
   const [adminToken, setAdminToken] = useState<string>(''); // Store the token
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   // Admin Modes - Unified Manage Mode
   const [isManageMode, setIsManageMode] = useState(false);
@@ -339,6 +350,9 @@ const App: React.FC = () => {
 
   const textPrimary = isDark ? "text-slate-100" : "text-slate-900";
   const textSecondary = isDark ? "text-white/60" : "text-black/60";
+
+  // Combine system tabs and custom categories for filter bar
+  const displayCategories = [Category.ALL, ...customCategories, Category.HORIZONTAL, Category.VERTICAL];
   
   return (
     <div className={`min-h-screen font-sans selection:bg-gray-500/30 ${textPrimary}`}>
@@ -406,17 +420,17 @@ const App: React.FC = () => {
           {/* Right: Filters, Theme, Admin */}
           <div className="flex items-center justify-between md:justify-end gap-3 overflow-x-auto no-scrollbar">
             
-            {/* Categories */}
-            <div className="flex items-center gap-2">
-              {Object.values(Category).map((cat) => (
+            {/* Categories (Compact) */}
+            <div className="flex items-center gap-1">
+              {displayCategories.map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
                   className={`
-                    px-3 py-1.5 rounded-full text-[10px] md:text-xs tracking-wider font-medium whitespace-nowrap transition-all duration-500 ease-liquid hover:scale-105 active:scale-95
+                    px-2 py-1 rounded text-[10px] tracking-wider font-medium whitespace-nowrap transition-all duration-300 ease-liquid
                     ${activeCategory === cat 
-                      ? (isDark ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.3)]' : 'bg-black text-white shadow-[0_5px_15px_rgba(0,0,0,0.2)]') 
-                      : (isDark ? 'text-white/50 hover:bg-white/10 hover:text-white border border-transparent hover:border-white/10' : 'text-black/50 hover:bg-black/5 hover:text-black border border-transparent hover:border-black/5')
+                      ? (isDark ? 'bg-white text-black' : 'bg-black text-white') 
+                      : (isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-black/50 hover:bg-black/5 hover:text-black')
                     }
                   `}
                 >
@@ -441,10 +455,9 @@ const App: React.FC = () => {
             {/* Admin / Login */}
             {isAdmin ? (
                <div className="flex items-center gap-2 flex-shrink-0">
-                 {/* Toggle Management Mode */}
+                 {/* Manage Mode */}
                  <button
                    onClick={() => {
-                     // Disable map view if entering manage mode to avoid conflicts
                      if (!isManageMode && viewMode === 'map') setViewMode('grid');
                      setIsManageMode(!isManageMode);
                    }}
@@ -462,6 +475,15 @@ const App: React.FC = () => {
                 >
                   <Plus size={18} strokeWidth={1.5} />
                 </button>
+
+                {/* Settings */}
+                <button
+                   onClick={() => setIsSettingsOpen(true)}
+                   className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5'}`}
+                   title="设置"
+                 >
+                   <Cog size={16} strokeWidth={1.5} />
+                 </button>
 
                 {/* Logout */}
                 <button
@@ -613,6 +635,7 @@ const App: React.FC = () => {
         theme={theme}
         editingPhoto={photoToEdit}
         token={adminToken}
+        categories={customCategories}
       />
 
       {/* Login Modal */}
@@ -621,6 +644,16 @@ const App: React.FC = () => {
         onClose={() => setIsLoginOpen(false)}
         onLoginSuccess={handleLoginSuccess}
         theme={theme}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        categories={customCategories}
+        onUpdateCategories={setCustomCategories}
+        theme={theme}
+        token={adminToken}
       />
     </div>
   );
