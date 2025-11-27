@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Tag, Loader2 } from 'lucide-react';
+import { X, Plus, Trash2, Tag, Loader2, Pencil, Check } from 'lucide-react';
 import { GlassCard } from './GlassCard';
 import { Theme } from '../types';
 import { client } from '../api/client';
@@ -19,6 +19,10 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
 }) => {
   const [newCat, setNewCat] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // Edit State
+  const [editingCat, setEditingCat] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
 
   const isDark = theme === 'dark';
   const textPrimary = isDark ? "text-white" : "text-black";
@@ -55,6 +59,39 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       alert("删除失败");
     }
     setLoading(false);
+  };
+
+  const startEdit = (cat: string) => {
+      setEditingCat(cat);
+      setEditValue(cat);
+  };
+
+  const cancelEdit = () => {
+      setEditingCat(null);
+      setEditValue('');
+  };
+
+  const saveEdit = async () => {
+      if (!editingCat || !editValue.trim()) return;
+      if (editValue.trim() === editingCat) {
+          cancelEdit();
+          return;
+      }
+      if (categories.includes(editValue.trim())) {
+          alert("分类名已存在");
+          return;
+      }
+
+      setLoading(true);
+      const updated = categories.map(c => c === editingCat ? editValue.trim() : c);
+      const success = await client.saveCategories(updated, token);
+      if (success) {
+          onUpdateCategories(updated);
+          cancelEdit();
+      } else {
+          alert("更新失败");
+      }
+      setLoading(false);
   };
 
   if (!isOpen) return null;
@@ -102,14 +139,45 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
             <div className="space-y-2">
                 {categories.map(cat => (
                     <div key={cat} className={`flex justify-between items-center p-3 rounded-lg border ${isDark ? 'bg-white/5 border-white/5' : 'bg-black/5 border-black/5'}`}>
-                        <span className={`text-sm ${textPrimary}`}>{cat}</span>
-                        <button 
-                           onClick={() => handleDelete(cat)}
-                           disabled={loading}
-                           className="text-red-400 hover:text-red-500 p-1 opacity-60 hover:opacity-100 transition-opacity"
-                        >
-                            <Trash2 size={14} />
-                        </button>
+                        {editingCat === cat ? (
+                            <div className="flex items-center gap-2 flex-1">
+                                <input 
+                                    type="text" 
+                                    value={editValue} 
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    className={`flex-1 bg-transparent border-b text-sm focus:outline-none ${isDark ? 'border-white/50 text-white' : 'border-black/50 text-black'}`}
+                                    autoFocus
+                                />
+                                <button onClick={saveEdit} disabled={loading} className="text-green-500 hover:text-green-400 p-1">
+                                    <Check size={16} />
+                                </button>
+                                <button onClick={cancelEdit} disabled={loading} className="text-red-400 hover:text-red-500 p-1">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <span className={`text-sm ${textPrimary}`}>{cat}</span>
+                                <div className="flex items-center gap-1">
+                                    <button 
+                                        onClick={() => startEdit(cat)}
+                                        disabled={loading}
+                                        className={`p-1 opacity-60 hover:opacity-100 transition-opacity ${isDark ? 'text-white' : 'text-black'}`}
+                                        title="编辑"
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button 
+                                        onClick={() => handleDelete(cat)}
+                                        disabled={loading}
+                                        className="text-red-400 hover:text-red-500 p-1 opacity-60 hover:opacity-100 transition-opacity"
+                                        title="删除"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 ))}
             </div>
