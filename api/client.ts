@@ -21,12 +21,42 @@ export const client = {
     }
   },
 
+  // 获取自定义分类
+  async getCategories(): Promise<string[] | null> {
+      try {
+          const res = await fetch(`${API_ROOT}/categories`);
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data.categories;
+      } catch (e) {
+          return null;
+      }
+  },
+
+  // 保存自定义分类
+  async saveCategories(categories: string[], token: string): Promise<boolean> {
+      try {
+          const res = await fetch(`${API_ROOT}/categories`, {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ categories })
+          });
+          return res.ok;
+      } catch (e) {
+          return false;
+      }
+  },
+
   // 获取照片列表
-  async getPhotos(page = 1, pageSize = 100, category?: Category): Promise<Photo[]> {
+  async getPhotos(page = 1, pageSize = 100, category?: string): Promise<Photo[]> {
     const params = new URLSearchParams({
       page: page.toString(),
       pageSize: pageSize.toString()
     });
+    // Only append category if it's not "All"
     if (category && category !== Category.ALL) {
       params.append('category', category);
     }
