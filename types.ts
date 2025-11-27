@@ -10,6 +10,8 @@ export enum Category {
   VERTICAL = '竖屏'
 }
 
+export const DEFAULT_CATEGORIES = ['风光', '人像', '人文', '微距', '黑白'];
+
 export type Theme = 'dark' | 'light';
 
 export interface ExifData {
@@ -29,7 +31,7 @@ export interface Photo {
   id: string;
   url: string;
   title: string;
-  category: Category;
+  category: string; // Changed from Category enum to string to support dynamic categories
   exif: ExifData;
   width?: number;
   height?: number;
