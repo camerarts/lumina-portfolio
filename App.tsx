@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft } from 'lucide-react';
+import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft, Map } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
@@ -184,94 +184,98 @@ const App: React.FC = () => {
       <Background />
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
-      {/* === Classic Sticky Header (High-End Flat) === */}
+      {/* === New High-End Two-Row Header === */}
       <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 backdrop-blur-md border-b ${isDark ? 'bg-black/80 border-white/5' : 'bg-white/90 border-black/5'}`}>
-          <div className="max-w-[1600px] mx-auto px-4 md:px-8 h-16 md:h-20 flex items-center justify-between">
+          <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-4">
               
-              {/* Logo Area */}
+              {/* Row 1: Logo Area */}
               <div 
                   onClick={() => { setActiveTab('最新'); setActiveCategory(Category.ALL); setViewMode('grid'); window.scrollTo({top:0, behavior:'smooth'}); }}
-                  className="font-serif text-xl tracking-[0.2em] cursor-pointer select-none font-light"
+                  className="font-serif text-3xl md:text-4xl tracking-[0.2em] cursor-pointer select-none font-light mb-4"
               >
                   LUMINA
               </div>
 
-              {/* Desktop Tabs Center */}
-              <nav className="hidden md:flex items-center gap-6">
-                  {FEED_TABS.map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => handleTabClick(tab)}
-                        className={`text-xs uppercase tracking-widest py-2 transition-all relative group
-                            ${activeTab === tab ? 'opacity-100 font-medium' : 'opacity-40 hover:opacity-80'}
-                        `}
-                    >
-                        {tab}
-                        {/* Underline Indicator */}
-                        <span className={`absolute bottom-0 left-0 h-[1px] bg-current transition-all duration-300
-                            ${activeTab === tab ? 'w-full' : 'w-0 group-hover:w-1/2'}
-                        `}/>
-                    </button>
-                  ))}
-              </nav>
-
-              {/* Right Controls */}
-              <div className="flex items-center gap-3">
-                   {/* Category Dropdown */}
-                   <div className="relative">
-                        <button onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${isDark ? 'border-white/10 hover:border-white/30' : 'border-black/10 hover:border-black/30'}`}>
-                            {activeCategory === Category.ALL ? '分类' : activeCategory}
-                            <ChevronDown size={10} className={`transition-transform duration-300 ${isCategoryOpen ? 'rotate-180' : ''}`} />
+              {/* Row 2: Navigation & Controls */}
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  
+                  {/* Left: Feed Tabs & Map Toggle */}
+                  <div className="flex items-center gap-6 overflow-x-auto w-full md:w-auto no-scrollbar">
+                      {FEED_TABS.map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => handleTabClick(tab)}
+                            className={`text-xs md:text-sm uppercase tracking-widest py-1 whitespace-nowrap transition-all relative group
+                                ${activeTab === tab ? 'opacity-100 font-medium' : 'opacity-40 hover:opacity-80'}
+                            `}
+                        >
+                            {tab}
+                            <span className={`absolute bottom-0 left-0 h-[1px] bg-current transition-all duration-300
+                                ${activeTab === tab ? 'w-full' : 'w-0 group-hover:w-1/2'}
+                            `}/>
                         </button>
-                        <div className={`absolute top-full right-0 mt-2 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-lg shadow-2xl border p-1 transition-all origin-top-right ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'} ${isDark ? 'bg-black/90 border-white/10' : 'bg-white/95 border-black/5'}`}>
-                            {displayCategories.map(cat => (
-                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors ${activeCategory === cat ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black') : 'opacity-60 hover:opacity-100 hover:bg-white/5'}`}>
-                                    {cat}
-                                </button>
-                            ))}
-                        </div>
-                   </div>
+                      ))}
 
-                   {/* Map/Grid Toggle */}
-                   <button onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')} className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${viewMode === 'map' ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : 'opacity-50 hover:opacity-100 hover:bg-white/5'}`}>
-                       <Globe size={16} strokeWidth={1.5} />
-                   </button>
+                      {/* Prominent Map Toggle */}
+                      <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
+                      
+                      <button 
+                        onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')} 
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-full transition-all duration-300 shadow-sm
+                            ${viewMode === 'map' 
+                                ? (isDark ? 'bg-white text-black font-medium' : 'bg-black text-white font-medium') 
+                                : (isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/5 hover:bg-black/10 text-black')}
+                        `}
+                      >
+                         {viewMode === 'map' ? <AlignLeft size={14} /> : <Map size={14} />}
+                         <span className="text-xs tracking-wider">{viewMode === 'map' ? '列表' : '地图'}</span>
+                      </button>
+                  </div>
 
-                   {/* Theme Toggle */}
-                   <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors">
-                       {isDark ? <Moon size={16} strokeWidth={1.5} /> : <Sun size={16} strokeWidth={1.5} />}
-                   </button>
+                  {/* Right: Categories & Tools */}
+                  <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                       {/* Category Dropdown */}
+                       <div className="relative z-50">
+                            <button onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${isDark ? 'border-white/10 hover:border-white/30' : 'border-black/10 hover:border-black/30'}`}>
+                                {activeCategory === Category.ALL ? '分类' : activeCategory}
+                                <ChevronDown size={10} className={`transition-transform duration-300 ${isCategoryOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            <div className={`absolute top-full right-0 mt-2 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-lg shadow-2xl border p-1 transition-all origin-top-right ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'} ${isDark ? 'bg-black/90 border-white/10' : 'bg-white/95 border-black/5'}`}>
+                                {displayCategories.map(cat => (
+                                    <button key={cat} onClick={() => setActiveCategory(cat)} className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors ${activeCategory === cat ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black') : 'opacity-60 hover:opacity-100 hover:bg-white/5'}`}>
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
+                       </div>
 
-                   {/* Admin Actions */}
-                   {isAdmin ? (
-                        <div className={`flex items-center gap-2 border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                            <button onClick={() => setIsManageMode(!isManageMode)} className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${isManageMode ? 'bg-blue-500 text-white' : 'opacity-50 hover:opacity-100 hover:bg-white/5'}`} title="管理"><Pencil size={16} strokeWidth={1.5} /></button>
-                            <button onClick={() => {setPhotoToEdit(null); setIsUploadOpen(true);}} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="上传"><Plus size={18} strokeWidth={1.5} /></button>
-                            <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="设置"><Cog size={16} strokeWidth={1.5} /></button>
-                            <button onClick={handleLogout} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="退出"><LogOut size={16} strokeWidth={1.5} /></button>
-                        </div>
-                   ) : (
-                        <div className={`border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                           <button onClick={() => setIsLoginOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors"><Settings size={16} strokeWidth={1.5} /></button>
-                        </div>
-                   )}
+                       {/* Theme Toggle */}
+                       <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors">
+                           {isDark ? <Moon size={16} strokeWidth={1.5} /> : <Sun size={16} strokeWidth={1.5} />}
+                       </button>
+
+                       {/* Admin Actions */}
+                       {isAdmin ? (
+                            <div className={`flex items-center gap-2 border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                                <button onClick={() => setIsManageMode(!isManageMode)} className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${isManageMode ? 'bg-blue-500 text-white' : 'opacity-50 hover:opacity-100 hover:bg-white/5'}`} title="管理"><Pencil size={16} strokeWidth={1.5} /></button>
+                                <button onClick={() => {setPhotoToEdit(null); setIsUploadOpen(true);}} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="上传"><Plus size={18} strokeWidth={1.5} /></button>
+                                <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="设置"><Cog size={16} strokeWidth={1.5} /></button>
+                                <button onClick={handleLogout} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="退出"><LogOut size={16} strokeWidth={1.5} /></button>
+                            </div>
+                       ) : (
+                            <div className={`border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                               <button onClick={() => setIsLoginOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors"><Settings size={16} strokeWidth={1.5} /></button>
+                            </div>
+                       )}
+                  </div>
               </div>
-          </div>
-
-          {/* Mobile Tabs Row */}
-          <div className="md:hidden flex justify-center gap-6 pb-3 border-b border-transparent">
-               {FEED_TABS.map(tab => (
-                 <button key={tab} onClick={() => handleTabClick(tab)} className={`text-[10px] uppercase tracking-widest transition-colors ${activeTab === tab ? 'opacity-100 font-medium border-b border-current' : 'opacity-40'}`}>
-                     {tab}
-                 </button>
-               ))}
           </div>
       </header>
 
       {/* Main Content Area */}
-      <main className={`pt-24 md:pt-32 pb-12 px-4 md:px-8 max-w-[1600px] mx-auto min-h-screen`}>
+      <main className={`pt-36 md:pt-40 pb-12 px-4 md:px-8 max-w-[1600px] mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
-           <div className={`w-full h-[80vh] rounded-2xl overflow-hidden border shadow-lg ${isDark ? 'border-white/10' : 'border-black/5'}`}>
+           <div className={`w-full h-[75vh] rounded-2xl overflow-hidden border shadow-lg ${isDark ? 'border-white/10' : 'border-black/5'}`}>
              <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
            </div>
         ) : (
