@@ -10,9 +10,6 @@ import { ProgressBar } from './components/ProgressBar';
 import { Category, Photo, Theme } from './types';
 import { client } from './api/client';
 
-// Hardcoded Admin Token for client-side consistency (matches backend env var)
-const ADMIN_TOKEN = "1211";
-
 // Helper: Calculate distance between two coordinates in km (Haversine formula)
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371; // Radius of the earth in km
@@ -64,6 +61,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminToken, setAdminToken] = useState<string>(''); // Store the token
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   
@@ -84,6 +82,28 @@ const App: React.FC = () => {
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
 
   const isDark = theme === 'dark';
+
+  // Check for saved login
+  useEffect(() => {
+    const savedToken = localStorage.getItem('lumina_token');
+    if (savedToken) {
+      setAdminToken(savedToken);
+      setIsAdmin(true);
+    }
+  }, []);
+
+  const handleLoginSuccess = (token: string) => {
+    setAdminToken(token);
+    setIsAdmin(true);
+    localStorage.setItem('lumina_token', token);
+  };
+
+  const handleLogout = () => {
+    setIsAdmin(false);
+    setIsManageMode(false);
+    setAdminToken('');
+    localStorage.removeItem('lumina_token');
+  };
 
   // Background Component based on Theme
   const Background = () => (
@@ -235,15 +255,25 @@ const App: React.FC = () => {
   const visiblePhotos = filteredPhotos.slice(0, visibleCount);
 
   const handleUpdatePhoto = (newPhoto: Photo) => {
-    // For upload, we prepend the new photo to the list locally for immediate feedback
-    // The actual persistence is done in UploadModal calling client.uploadPhoto
-    setPhotos(prev => [newPhoto, ...prev]);
+    setPhotos(prev => {
+        // If it's an update, replace the existing one
+        const index = prev.findIndex(p => p.id === newPhoto.id);
+        if (index >= 0) {
+            const updated = [...prev];
+            updated[index] = newPhoto;
+            return updated;
+        }
+        // If it's new, prepend
+        return [newPhoto, ...prev];
+    });
     
-    // Reset filters to show new photo
-    setActiveCategory(Category.ALL);
-    setActiveTab('最新');
-    setViewMode('grid');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Reset filters to show new photo (only if new)
+    if (!photoToEdit) {
+        setActiveCategory(Category.ALL);
+        setActiveTab('最新');
+        setViewMode('grid');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
@@ -257,7 +287,7 @@ const App: React.FC = () => {
       if (isConfirmed) {
         try {
           setGlobalLoading(true);
-          await client.deletePhoto(photoId, ADMIN_TOKEN);
+          await client.deletePhoto(photoId, adminToken);
           setPhotos(prev => prev.filter(p => p.id !== photoId));
           if (selectedPhoto?.id === photoId) {
             setSelectedPhoto(null);
@@ -309,11 +339,10 @@ const App: React.FC = () => {
       <Background />
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
-      {/* Hero Section - Redesigned for Minimalist Premium Look */}
+      {/* Hero Section */}
       {viewMode !== 'map' && (
         <header className="pt-12 pb-8 px-6 max-w-7xl mx-auto text-center">
           <div className="animate-fade-in flex flex-col items-center">
-            {/* Extremely spaced, thin serif font for luxury feel */}
             <h1 className="text-5xl md:text-8xl font-serif font-thin tracking-[0.2em] leading-tight mb-2 uppercase mix-blend-overlay opacity-90">
               Lumina
             </h1>
@@ -325,7 +354,7 @@ const App: React.FC = () => {
         </header>
       )}
 
-      {/* Unified Sticky Utility Bar - Liquid Glass Style */}
+      {/* Unified Sticky Utility Bar */}
       <div className={`sticky top-0 z-40 transition-all duration-500 ease-liquid
         ${isDark ? 'bg-black/40' : 'bg-white/60'}
         backdrop-blur-2xl border-b 
@@ -333,7 +362,7 @@ const App: React.FC = () => {
       `}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           
-          {/* Left: Text Tabs with Liquid Hover */}
+          {/* Left: Text Tabs */}
           <div className="flex gap-6 overflow-x-auto no-scrollbar items-center">
              {FEED_TABS.map(tab => (
                <button
@@ -353,7 +382,7 @@ const App: React.FC = () => {
                </button>
              ))}
              
-             {/* Map Toggle (Globe Icon) with Liquid Hover */}
+             {/* Map Toggle */}
              <button
                onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')}
                className={`p-2 rounded-full transition-all duration-500 ease-liquid flex items-center justify-center hover:scale-110 active:scale-95
@@ -368,10 +397,10 @@ const App: React.FC = () => {
              </button>
           </div>
 
-          {/* Right: Filters, Theme, Admin (Compact & Liquid) */}
+          {/* Right: Filters, Theme, Admin */}
           <div className="flex items-center justify-between md:justify-end gap-3 overflow-x-auto no-scrollbar">
             
-            {/* Categories - Compact Pills */}
+            {/* Categories */}
             <div className="flex items-center gap-2">
               {Object.values(Category).map((cat) => (
                 <button
@@ -430,10 +459,7 @@ const App: React.FC = () => {
 
                 {/* Logout */}
                 <button
-                   onClick={() => {
-                     setIsAdmin(false);
-                     setIsManageMode(false);
-                   }}
+                   onClick={handleLogout}
                    className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-500 ease-liquid hover:scale-110 active:scale-90 ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-black/60 hover:bg-black/5'}`}
                    title="退出登录"
                  >
@@ -463,7 +489,6 @@ const App: React.FC = () => {
       `}>
         
         {viewMode === 'map' ? (
-           // MAP VIEW
            <div className="w-full h-full">
              <MapView 
                photos={filteredPhotos} 
@@ -473,7 +498,6 @@ const App: React.FC = () => {
              />
            </div>
         ) : (
-          // GRID VIEW
           <>
             <div className="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
               {visiblePhotos.map((photo) => (
@@ -497,7 +521,7 @@ const App: React.FC = () => {
                         loading="lazy"
                       />
                       
-                      {/* Minimal Overlay - Info on Hover (Only if not in manage mode) */}
+                      {/* Minimal Overlay */}
                       {!isManageMode && (
                         <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4`}>
                           <p className="text-white font-serif text-lg font-medium translate-y-4 group-hover:translate-y-0 transition-transform duration-500 ease-liquid">{photo.title}</p>
@@ -554,7 +578,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer - Hidden in Map View */}
+      {/* Footer */}
       {viewMode !== 'map' && (
         <footer className={`border-t py-12 text-center text-[10px] uppercase tracking-[0.2em] font-light ${isDark ? 'border-white/5 text-white/20' : 'border-black/5 text-black/20'}`}>
           <p>© {new Date().getFullYear()} LUMINA. All Rights Reserved.</p>
@@ -582,13 +606,14 @@ const App: React.FC = () => {
         onUpload={handleUpdatePhoto} 
         theme={theme}
         editingPhoto={photoToEdit}
+        token={adminToken}
       />
 
       {/* Login Modal */}
       <LoginModal
         isOpen={isLoginOpen}
         onClose={() => setIsLoginOpen(false)}
-        onLoginSuccess={() => setIsAdmin(true)}
+        onLoginSuccess={handleLoginSuccess}
         theme={theme}
       />
     </div>
