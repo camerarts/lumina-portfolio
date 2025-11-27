@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Plus, Trash2, Tag, Loader2, Pencil, Check, GripVertical, Image as ImageIcon, CheckCircle, MapPin } from 'lucide-react';
+import { X, Plus, Trash2, Tag, Loader2, Pencil, Check, GripVertical, Image as ImageIcon, CheckCircle, MapPin, Camera, Aperture } from 'lucide-react';
 import { GlassCard } from './GlassCard';
-import { Theme, Photo } from '../types';
+import { Theme, Photo, Presets } from '../types';
 import { client } from '../api/client';
 
 interface SystemSettingsModalProps {
@@ -14,7 +14,7 @@ interface SystemSettingsModalProps {
   token: string;
 }
 
-type Tab = 'categories' | 'batch_edit';
+type Tab = 'categories' | 'batch_edit' | 'menu_presets';
 
 export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({ 
   isOpen, onClose, categories = [], onUpdateCategories, theme, token 
@@ -30,6 +30,12 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [editingCat, setEditingCat] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+
+  // === PRESETS MANAGEMENT STATE ===
+  const [presets, setPresets] = useState<Presets>({ cameras: [], lenses: [] });
+  const [newCamera, setNewCamera] = useState('');
+  const [newLens, setNewLens] = useState('');
+  const [loadingPresets, setLoadingPresets] = useState(false);
 
   // === BATCH EDIT STATE ===
   const [recentPhotos, setRecentPhotos] = useState<Photo[]>([]);
@@ -48,6 +54,18 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markerInstance = useRef<any>(null);
+
+  // Fetch data on open
+  useEffect(() => {
+    if (isOpen) {
+       // Fetch Presets
+       const fetchPresets = async () => {
+           const p = await client.getPresets();
+           if (p) setPresets(p);
+       };
+       fetchPresets();
+    }
+  }, [isOpen]);
 
   // Fetch photos when switching to Batch Tab
   useEffect(() => {
@@ -162,12 +180,11 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const onDragStart = (e: React.DragEvent, index: number) => {
     setDraggedItemIndex(index);
     e.dataTransfer.effectAllowed = "move";
-    // Important for Firefox
     e.dataTransfer.setData("text/plain", String(index));
   };
 
   const onDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
 
@@ -179,13 +196,39 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
     const [movedItem] = newCategories.splice(draggedItemIndex, 1);
     newCategories.splice(index, 0, movedItem);
 
-    onUpdateCategories(newCategories); // Optimistic UI update
+    onUpdateCategories(newCategories);
     setDraggedItemIndex(null);
 
-    // Persist order
     setLoading(true);
     await client.saveCategories(newCategories, token);
     setLoading(false);
+  };
+
+  // === PRESETS LOGIC ===
+
+  const handleAddPreset = async (type: 'cameras' | 'lenses', value: string) => {
+    if (!value.trim()) return;
+    if (presets[type].includes(value.trim())) { alert("已存在"); return; }
+    
+    setLoadingPresets(true);
+    const updated = { ...presets, [type]: [...presets[type], value.trim()] };
+    const success = await client.savePresets(updated, token);
+    if (success) { 
+        setPresets(updated); 
+        if(type==='cameras') setNewCamera(''); else setNewLens(''); 
+    } else { 
+        alert("保存失败"); 
+    }
+    setLoadingPresets(false);
+  };
+
+  const handleDeletePreset = async (type: 'cameras' | 'lenses', value: string) => {
+    if (!confirm(`确定删除 "${value}" 吗?`)) return;
+    setLoadingPresets(true);
+    const updated = { ...presets, [type]: presets[type].filter(item => item !== value) };
+    const success = await client.savePresets(updated, token);
+    if (success) { setPresets(updated); } else { alert("删除失败"); }
+    setLoadingPresets(false);
   };
 
   // === BATCH EDIT LOGIC ===
@@ -229,21 +272,13 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
      const success = await client.batchUpdatePhotos(Array.from(selectedPhotos), updates, token);
      if (success) {
          alert("批量更新成功！");
-         // Update local list to reflect changes
          const updatedList = recentPhotos.map(p => {
              if (selectedPhotos.has(p.id)) {
-                 return {
-                     ...p,
-                     exif: {
-                         ...p.exif,
-                         ...updates
-                     }
-                 };
+                 return { ...p, exif: { ...p.exif, ...updates } };
              }
              return p;
          });
          setRecentPhotos(updatedList);
-         // Clear fields
          setSelectedPhotos(new Set());
      } else {
          alert("更新失败，请重试");
@@ -269,10 +304,16 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                       分类排序
                   </button>
                   <button 
+                    onClick={() => setActiveTab('menu_presets')}
+                    className={`text-sm pb-1 border-b-2 transition-colors ${activeTab === 'menu_presets' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}
+                  >
+                      菜单预设置
+                  </button>
+                  <button 
                     onClick={() => setActiveTab('batch_edit')}
                     className={`text-sm pb-1 border-b-2 transition-colors ${activeTab === 'batch_edit' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}
                   >
-                      批量修改元数据
+                      批量修改
                   </button>
               </div>
             </div>
@@ -346,6 +387,63 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                 </div>
             )}
 
+            {/* === MENU PRESETS TAB === */}
+            {activeTab === 'menu_presets' && (
+                <div className="h-full grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Cameras */}
+                    <div className="flex flex-col h-full">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Camera size={16} className={textPrimary} />
+                            <h3 className={`font-semibold ${textPrimary}`}>相机预设</h3>
+                        </div>
+                        <div className="flex gap-2 mb-3">
+                            <input 
+                              value={newCamera} onChange={e => setNewCamera(e.target.value)} 
+                              placeholder="添加相机型号"
+                              className={`flex-1 rounded-lg px-3 py-2 text-xs border bg-transparent focus:outline-none ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}
+                            />
+                            <button onClick={() => handleAddPreset('cameras', newCamera)} disabled={loadingPresets} className={`px-3 rounded-lg ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
+                                <Plus size={16} />
+                            </button>
+                        </div>
+                        <div className={`flex-1 overflow-y-auto rounded-lg border p-2 space-y-1 ${isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+                            {presets.cameras.map(item => (
+                                <div key={item} className={`flex justify-between items-center p-2 rounded hover:bg-white/10 group`}>
+                                    <span className={`text-xs ${textPrimary}`}>{item}</span>
+                                    <button onClick={() => handleDeletePreset('cameras', item)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12} /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Lenses */}
+                    <div className="flex flex-col h-full">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Aperture size={16} className={textPrimary} />
+                            <h3 className={`font-semibold ${textPrimary}`}>镜头预设</h3>
+                        </div>
+                        <div className="flex gap-2 mb-3">
+                            <input 
+                              value={newLens} onChange={e => setNewLens(e.target.value)} 
+                              placeholder="添加镜头型号"
+                              className={`flex-1 rounded-lg px-3 py-2 text-xs border bg-transparent focus:outline-none ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}
+                            />
+                            <button onClick={() => handleAddPreset('lenses', newLens)} disabled={loadingPresets} className={`px-3 rounded-lg ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
+                                <Plus size={16} />
+                            </button>
+                        </div>
+                        <div className={`flex-1 overflow-y-auto rounded-lg border p-2 space-y-1 ${isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+                            {presets.lenses.map(item => (
+                                <div key={item} className={`flex justify-between items-center p-2 rounded hover:bg-white/10 group`}>
+                                    <span className={`text-xs ${textPrimary}`}>{item}</span>
+                                    <button onClick={() => handleDeletePreset('lenses', item)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12} /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* === BATCH EDIT TAB === */}
             {activeTab === 'batch_edit' && (
                 <div className="h-full flex flex-col md:flex-row gap-6">
@@ -391,11 +489,25 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                          <div className="space-y-3 mb-4">
                             <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>相机型号</label>
-                                <input type="text" value={batchCamera} onChange={e=>setBatchCamera(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" />
+                                <input 
+                                  list="camera-presets"
+                                  type="text" value={batchCamera} onChange={e=>setBatchCamera(e.target.value)} 
+                                  className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" 
+                                />
+                                <datalist id="camera-presets">
+                                    {presets.cameras.map(c => <option key={c} value={c} />)}
+                                </datalist>
                             </div>
                             <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>镜头</label>
-                                <input type="text" value={batchLens} onChange={e=>setBatchLens(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" />
+                                <input 
+                                  list="lens-presets"
+                                  type="text" value={batchLens} onChange={e=>setBatchLens(e.target.value)} 
+                                  className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" 
+                                />
+                                <datalist id="lens-presets">
+                                    {presets.lenses.map(c => <option key={c} value={c} />)}
+                                </datalist>
                             </div>
                             <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>地点名称</label>
