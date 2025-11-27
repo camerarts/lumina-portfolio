@@ -354,6 +354,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
         if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; }
         return;
     }
+    
+    // Check for container mismatch (happens when switching modes)
+    if (mapInstance.current && mapRef.current && mapInstance.current.getContainer() !== mapRef.current) {
+         mapInstance.current.remove();
+         mapInstance.current = null;
+    }
+
     // Delay slightly to allow DOM to render
     const timer = setTimeout(() => {
         const L = (window as any).L;
@@ -402,8 +409,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                 markerInstance.current.setLatLng(e.latlng);
                 updateCoords(e.latlng.lat, e.latlng.lng);
             });
+            
+            // Fix map resize issues in modal
+            setTimeout(() => { map.invalidateSize(); }, 200);
+
         } else {
             // Update existing map if coords changed externally (e.g. EXIF loaded)
+            mapInstance.current.invalidateSize();
             if (!isNaN(latNum) && !isNaN(lngNum)) {
                 // Only pan if distance is significant to avoid jitter
                 const cur = markerInstance.current.getLatLng();
