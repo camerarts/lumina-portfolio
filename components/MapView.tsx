@@ -44,7 +44,7 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       if (existingGroup) {
         existingGroup.photos.push(photo);
       } else {
-        const locName = (photo.exif.location || '未知地点').split(',')[0].trim();
+        const locName = (photo.exif.location || '未知地点');
         groups.push({
           id: `loc-${groups.length}`,
           name: locName,
@@ -125,6 +125,15 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
           [group.latitude, group.longitude - 360]
       ];
 
+      // Parse location string to create hierarchical title
+      const rawLoc = group.name;
+      const parts = rawLoc.split(/[,，]/).map(s => s.trim());
+      // Assuming Format from Geocoding: District, City, Province, Country
+      // We want Main Title: District
+      // Subtitle: City, Province
+      const mainTitle = parts[0] || 'Unknown';
+      const subTitle = parts.slice(1).join(''); 
+
       positions.forEach(pos => {
         // Create a clean circle marker with REDUCED RADIUS (3)
         const marker = L.circleMarker(pos, {
@@ -144,11 +153,12 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
           <div className={`w-64 rounded-xl shadow-xl overflow-hidden backdrop-blur-md border animate-fade-in
              ${theme === 'dark' ? 'bg-black/80 border-white/10 text-white' : 'bg-white/90 border-black/5 text-black'}
           `}>
-            <div className={`p-3 border-b flex justify-between items-center ${theme === 'dark' ? 'border-white/10' : 'border-black/5'}`}>
-               <div>
-                  <h3 className="font-serif font-medium text-sm leading-tight">{group.name}</h3>
-                  <div className="flex items-center gap-1 opacity-50 text-[10px] uppercase tracking-wider mt-0.5">
-                    <MapPin size={8} />
+            <div className={`p-4 border-b flex justify-between items-start ${theme === 'dark' ? 'border-white/10' : 'border-black/5'}`}>
+               <div className="flex-1">
+                  <h3 className="font-serif font-medium text-lg leading-tight mb-0.5">{mainTitle}</h3>
+                  <p className="text-xs opacity-60 font-sans">{subTitle}</p>
+                  <div className="flex items-center gap-1 opacity-50 text-[10px] uppercase tracking-wider mt-2">
+                    <MapPin size={10} />
                     <span>{group.photos.length} 张照片</span>
                   </div>
                </div>
