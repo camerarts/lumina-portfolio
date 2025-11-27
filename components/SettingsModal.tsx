@@ -15,7 +15,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, categories, onUpdateCategories, theme, token 
+  isOpen, onClose, categories = [], onUpdateCategories, theme, token 
 }) => {
   const [newCat, setNewCat] = useState('');
   const [loading, setLoading] = useState(false);
