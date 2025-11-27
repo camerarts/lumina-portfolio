@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Layers, Aperture, Zap, Gauge, Star, MoreHorizontal } from 'lucide-react';
 import { ExifData, Theme } from '../types';
@@ -25,6 +26,21 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
   const labelColor = isDark ? 'text-white/40' : 'text-[#888888]';
   const valueColor = isDark ? 'text-white/90' : 'text-[#333333]';
   const iconColor = isDark ? 'text-white/70' : 'text-[#555555]';
+
+  // Determine Location Display
+  let displayLocation = 'Unknown';
+  if (exif.location && exif.location.trim() !== '' && exif.location !== 'Unknown') {
+      displayLocation = exif.location;
+  } else if (exif.latitude && exif.longitude) {
+      // Fallback to coordinates
+      const lat = typeof exif.latitude === 'string' ? parseFloat(exif.latitude) : exif.latitude;
+      const lng = typeof exif.longitude === 'string' ? parseFloat(exif.longitude) : exif.longitude;
+      if (!isNaN(lat) && !isNaN(lng)) {
+          const latDir = lat >= 0 ? 'N' : 'S';
+          const lngDir = lng >= 0 ? 'E' : 'W';
+          displayLocation = `${Math.abs(lat).toFixed(2)}°${latDir}, ${Math.abs(lng).toFixed(2)}°${lngDir}`;
+      }
+  }
 
   return (
     <div className={`w-full flex flex-wrap items-end justify-center gap-y-2 gap-x-4 md:gap-x-8 text-xs md:text-sm font-sans ${className}`}>
@@ -74,7 +90,7 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
       {/* 3. Location Column */}
       <div className="flex flex-col items-center gap-0.5">
          <span className={`text-[10px] uppercase tracking-widest ${labelColor} scale-90 origin-bottom`}>地点</span>
-         <span className={`${valueColor} font-medium`}>{exif.location || 'Unknown'}</span>
+         <span className={`${valueColor} font-medium`}>{displayLocation}</span>
       </div>
 
       {/* 4. Camera Column */}
