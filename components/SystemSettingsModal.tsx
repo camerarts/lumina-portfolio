@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Tag, Loader2, Pencil, Check, GripVertical, Image as ImageIcon, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Plus, Trash2, Tag, Loader2, Pencil, Check, GripVertical, Image as ImageIcon, CheckCircle, MapPin } from 'lucide-react';
 import { GlassCard } from './GlassCard';
 import { Theme, Photo } from '../types';
 import { client } from '../api/client';
@@ -44,6 +44,11 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [batchLat, setBatchLat] = useState('');
   const [batchLng, setBatchLng] = useState('');
 
+  // Map Refs
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<any>(null);
+  const markerInstance = useRef<any>(null);
+
   // Fetch photos when switching to Batch Tab
   useEffect(() => {
     if (isOpen && activeTab === 'batch_edit' && recentPhotos.length === 0) {
@@ -56,6 +61,67 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       fetchPhotos();
     }
   }, [isOpen, activeTab]);
+
+  // Map Initialization for Batch Edit
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'batch_edit') return;
+
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      const L = (window as any).L;
+      if (!L || !mapRef.current) return;
+
+      if (!mapInstance.current) {
+         // Default center or use input
+         let center: [number, number] = [35.6895, 139.6917];
+         const latNum = parseFloat(batchLat);
+         const lngNum = parseFloat(batchLng);
+         if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
+
+         mapInstance.current = L.map(mapRef.current, {
+             center: center,
+             zoom: 2,
+             zoomControl: false,
+             attributionControl: false
+         });
+
+         const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
+         L.tileLayer(`https://{s}.basemaps.cartocdn.com/${layerStyle}/{z}/{x}/{y}{r}.png`, { maxZoom: 20, subdomains: 'abcd' }).addTo(mapInstance.current);
+
+         const dotIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="background-color: ${theme === 'dark' ? '#ffffff' : '#000000'}; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.5);"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6]
+         });
+
+         markerInstance.current = L.marker(center, { icon: dotIcon, draggable: true }).addTo(mapInstance.current);
+
+         // Events
+         const updateCoords = (lat: number, lng: number) => {
+             setBatchLat(lat.toFixed(6));
+             setBatchLng(lng.toFixed(6));
+         };
+
+         markerInstance.current.on('dragend', function(event: any) {
+            const pos = event.target.getLatLng();
+            updateCoords(pos.lat, pos.lng);
+         });
+
+         mapInstance.current.on('click', function(e: any) {
+            markerInstance.current.setLatLng(e.latlng);
+            updateCoords(e.latlng.lat, e.latlng.lng);
+         });
+         
+         setTimeout(() => mapInstance.current?.invalidateSize(), 100);
+
+      } else {
+         // Update existing map
+         mapInstance.current.invalidateSize();
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [isOpen, activeTab, theme]);
 
   // === CATEGORY LOGIC ===
 
@@ -317,12 +383,12 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                     </div>
 
                     {/* Right: Input Fields */}
-                    <div className={`w-full md:w-80 flex-shrink-0 p-4 rounded-xl border flex flex-col ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
+                    <div className={`w-full md:w-80 flex-shrink-0 p-4 rounded-xl border flex flex-col overflow-y-auto custom-scrollbar ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
                          <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${textPrimary}`}>
                              <Tag size={14} /> 批量修改 ({selectedPhotos.size} 张)
                          </h3>
 
-                         <div className="space-y-3 flex-1 overflow-y-auto">
+                         <div className="space-y-3 mb-4">
                             <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>相机型号</label>
                                 <input type="text" value={batchCamera} onChange={e=>setBatchCamera(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" />
@@ -339,14 +405,17 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>日期</label>
                                 <input type="date" value={batchDate} onChange={e=>setBatchDate(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} />
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label className={`block text-xs mb-1 ${textSecondary}`}>纬度</label>
-                                    <input type="number" step="any" value={batchLat} onChange={e=>setBatchLat(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="0.00" />
+                            
+                            {/* Map for Batch GPS */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <label className={`block text-xs ${textSecondary}`}>地理坐标</label>
+                                    <MapPin size={12} className={textSecondary} />
                                 </div>
-                                <div>
-                                    <label className={`block text-xs mb-1 ${textSecondary}`}>经度</label>
-                                    <input type="number" step="any" value={batchLng} onChange={e=>setBatchLng(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="0.00" />
+                                <div ref={mapRef} className="w-full h-32 rounded bg-gray-500/10 overflow-hidden" />
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input type="number" step="any" value={batchLat} onChange={e=>setBatchLat(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="纬度" />
+                                    <input type="number" step="any" value={batchLng} onChange={e=>setBatchLng(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="经度" />
                                 </div>
                             </div>
                          </div>
@@ -354,7 +423,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                          <button 
                              onClick={handleBatchUpdate}
                              disabled={loading || selectedPhotos.size === 0}
-                             className={`w-full mt-4 py-2.5 rounded-lg font-medium text-sm transition-transform active:scale-95 ${isDark ? 'bg-white text-black disabled:bg-white/20' : 'bg-black text-white disabled:bg-black/20'}`}
+                             className={`w-full py-2.5 rounded-lg font-medium text-sm transition-transform active:scale-95 ${isDark ? 'bg-white text-black disabled:bg-white/20' : 'bg-black text-white disabled:bg-black/20'}`}
                          >
                              {loading ? '处理中...' : '应用修改'}
                          </button>
