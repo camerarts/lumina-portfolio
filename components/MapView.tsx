@@ -35,6 +35,8 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         return;
       }
 
+      const locName = (photo.exif.location && photo.exif.location.trim() !== '') ? photo.exif.location : '未知地点';
+
       // Find existing group nearby
       const existingGroup = groups.find(g => 
         Math.abs(g.latitude - photo.exif.latitude!) < THRESHOLD && 
@@ -43,8 +45,11 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
 
       if (existingGroup) {
         existingGroup.photos.push(photo);
+        // Upgrade group name if current is unknown but new photo has a valid name
+        if ((existingGroup.name === '未知地点' || existingGroup.name === 'Unknown') && locName !== '未知地点') {
+            existingGroup.name = locName;
+        }
       } else {
-        const locName = (photo.exif.location || '未知地点');
         groups.push({
           id: `loc-${groups.length}`,
           name: locName,
@@ -127,12 +132,20 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
 
       // Parse location string to create hierarchical title
       const rawLoc = group.name;
-      const parts = rawLoc.split(/[,，]/).map(s => s.trim());
-      // Assuming Format from Geocoding: District, City, Province, Country
-      // We want Main Title: District
-      // Subtitle: City, Province
-      const mainTitle = parts[0] || 'Unknown';
-      const subTitle = parts.slice(1).join(''); 
+      let mainTitle = '';
+      let subTitle = '';
+
+      if (rawLoc === '未知地点' || rawLoc === 'Unknown') {
+         // Fallback to formatted coordinates if name is unknown
+         const latDir = group.latitude >= 0 ? 'N' : 'S';
+         const lngDir = group.longitude >= 0 ? 'E' : 'W';
+         mainTitle = `${Math.abs(group.latitude).toFixed(2)}°${latDir}, ${Math.abs(group.longitude).toFixed(2)}°${lngDir}`;
+         subTitle = '地理坐标';
+      } else {
+         const parts = rawLoc.split(/[,，]/).map(s => s.trim());
+         mainTitle = parts[0] || 'Unknown';
+         subTitle = parts.slice(1).join(', ');
+      }
 
       positions.forEach(pos => {
         // Create a clean circle marker with REDUCED RADIUS (3)
