@@ -42,3 +42,8 @@ export interface User {
   isAuthenticated: boolean;
   username?: string;
 }
+
+export interface Presets {
+  cameras: string[];
+  lenses: string[];
+}
