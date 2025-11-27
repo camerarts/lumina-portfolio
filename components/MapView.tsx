@@ -24,15 +24,16 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
-  const isDark = theme === 'dark';
-
   // 1. Group photos by location proximity (approx 20km radius)
   const locationGroups = useMemo(() => {
     const groups: LocationGroup[] = [];
     const THRESHOLD = 0.2; // roughly 20km degrees diff
 
     photos.forEach(photo => {
-      if (!photo.exif.latitude || !photo.exif.longitude) return;
+      // Safety check: ensure exif and coordinates exist
+      if (!photo.exif || typeof photo.exif.latitude !== 'number' || typeof photo.exif.longitude !== 'number') {
+        return;
+      }
 
       // Find existing group nearby
       const existingGroup = groups.find(g => 
@@ -43,7 +44,7 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       if (existingGroup) {
         existingGroup.photos.push(photo);
       } else {
-        const locName = photo.exif.location.split(',')[0].trim() || '未知地点';
+        const locName = (photo.exif.location || '未知地点').split(',')[0].trim();
         groups.push({
           id: `loc-${groups.length}`,
           name: locName,
@@ -127,7 +128,7 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       positions.forEach(pos => {
         // Create a clean circle marker with REDUCED RADIUS (3)
         const marker = L.circleMarker(pos, {
-          radius: 3, // Reduced from 6 to 3
+          radius: 3, 
           fillColor: theme === 'dark' ? '#fff' : '#000',
           color: 'transparent',
           weight: 0,
@@ -182,9 +183,9 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
           offset: [0, -4]
         });
 
-        // Marker interactions - Hover radius reduced to 5
+        // Marker interactions
         marker.on('mouseover', function (this: any) {
-          this.setStyle({ fillOpacity: 1, radius: 5 }); // Reduced from 9 to 5
+          this.setStyle({ fillOpacity: 1, radius: 5 });
           this.openPopup();
         });
 
