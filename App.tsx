@@ -5,7 +5,7 @@ import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
 import { LoginModal } from './components/LoginModal';
-import { SettingsModal } from './components/SettingsModal'; // New Component
+import { SystemSettingsModal } from './components/SystemSettingsModal';
 import { MapView } from './components/MapView';
 import { ProgressBar } from './components/ProgressBar';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES } from './types';
@@ -646,8 +646,8 @@ const App: React.FC = () => {
         theme={theme}
       />
 
-      {/* Settings Modal */}
-      <SettingsModal
+      {/* Settings Modal - Renamed to SystemSettingsModal */}
+      <SystemSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         categories={customCategories}
