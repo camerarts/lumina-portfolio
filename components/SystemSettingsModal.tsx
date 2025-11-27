@@ -16,6 +16,28 @@ interface SystemSettingsModalProps {
 
 type Tab = 'categories' | 'batch_edit' | 'menu_presets';
 
+// Reused Helper from UploadModal for Reverse Geocoding
+const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string> => {
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=zh-CN`);
+        if (!response.ok) return '';
+        const data = await response.json();
+        const addr = data.address;
+        if (!addr) return '';
+        
+        const parts = [];
+        if (addr.district || addr.county) parts.push(addr.district || addr.county);
+        if (addr.city || addr.town) parts.push(addr.city || addr.town);
+        if (addr.state || addr.province) parts.push(addr.state || addr.province);
+        if (addr.country) parts.push(addr.country);
+
+        return parts.join(', ');
+    } catch (e) {
+        console.error("Geocoding error", e);
+        return '';
+    }
+}
+
 export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({ 
   isOpen, onClose, categories = [], onUpdateCategories, theme, token 
 }) => {
@@ -49,6 +71,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [batchDate, setBatchDate] = useState('');
   const [batchLat, setBatchLat] = useState('');
   const [batchLng, setBatchLng] = useState('');
+  const [batchManualLoc, setBatchManualLoc] = useState(false);
 
   // Map Refs
   const mapRef = useRef<HTMLDivElement>(null);
@@ -89,16 +112,20 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       const L = (window as any).L;
       if (!L || !mapRef.current) return;
 
-      if (!mapInstance.current) {
-         // Default center or use input
-         let center: [number, number] = [35.6895, 139.6917];
-         const latNum = parseFloat(batchLat);
-         const lngNum = parseFloat(batchLng);
-         if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
+      // Current Coords
+      let center: [number, number] | null = null;
+      const latNum = parseFloat(batchLat);
+      const lngNum = parseFloat(batchLng);
+      if (!isNaN(latNum) && !isNaN(lngNum)) {
+         center = [latNum, lngNum];
+      }
+
+      const initMap = (startCenter: [number, number]) => {
+         if (mapInstance.current) return;
 
          mapInstance.current = L.map(mapRef.current, {
-             center: center,
-             zoom: 2,
+             center: startCenter,
+             zoom: 4,
              zoomControl: false,
              attributionControl: false
          });
@@ -112,30 +139,50 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
             iconSize: [12, 12], iconAnchor: [6, 6]
          });
 
-         markerInstance.current = L.marker(center, { icon: dotIcon, draggable: true }).addTo(mapInstance.current);
+         markerInstance.current = L.marker(startCenter, { icon: dotIcon, draggable: true }).addTo(mapInstance.current);
 
          // Events
-         const updateCoords = (lat: number, lng: number) => {
+         const updateCoordsAndAddress = async (lat: number, lng: number) => {
              setBatchLat(lat.toFixed(6));
              setBatchLng(lng.toFixed(6));
+             if (!batchManualLoc) {
+                 const addr = await fetchAddressFromCoords(lat, lng);
+                 if (addr) setBatchLocation(addr);
+             }
          };
 
          markerInstance.current.on('dragend', function(event: any) {
             const pos = event.target.getLatLng();
-            updateCoords(pos.lat, pos.lng);
+            updateCoordsAndAddress(pos.lat, pos.lng);
          });
 
          mapInstance.current.on('click', function(e: any) {
             markerInstance.current.setLatLng(e.latlng);
-            updateCoords(e.latlng.lat, e.latlng.lng);
+            updateCoordsAndAddress(e.latlng.lat, e.latlng.lng);
          });
          
          setTimeout(() => mapInstance.current?.invalidateSize(), 100);
+      };
 
+      if (center) {
+          initMap(center);
+      } else if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                  const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                  initMap(userCenter);
+                  if(!batchLat) {
+                      setBatchLat(pos.coords.latitude.toFixed(6));
+                      setBatchLng(pos.coords.longitude.toFixed(6));
+                  }
+              },
+              (err) => initMap([35.6895, 139.6917]),
+              { timeout: 5000 }
+          );
       } else {
-         // Update existing map
-         mapInstance.current.invalidateSize();
+          initMap([35.6895, 139.6917]);
       }
+
     }, 200);
 
     return () => clearTimeout(timer);
@@ -511,7 +558,13 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                             </div>
                             <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>地点名称</label>
-                                <input type="text" value={batchLocation} onChange={e=>setBatchLocation(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="保持原样" />
+                                <input 
+                                    type="text" 
+                                    value={batchLocation} 
+                                    onChange={(e) => { setBatchLocation(e.target.value); setBatchManualLoc(true); }} 
+                                    className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} 
+                                    placeholder="自动获取或手动输入" 
+                                />
                             </div>
                              <div>
                                 <label className={`block text-xs mb-1 ${textSecondary}`}>日期</label>
