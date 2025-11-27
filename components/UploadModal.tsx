@@ -154,6 +154,28 @@ const processImageFile = async (file: File): Promise<ProcessedImage> => {
    });
 };
 
+const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string> => {
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=zh-CN`);
+        if (!response.ok) return '';
+        const data = await response.json();
+        const addr = data.address;
+        if (!addr) return '';
+        
+        // Construct hierarchal string: District/County | City | Province | Country
+        const parts = [];
+        if (addr.district || addr.county) parts.push(addr.district || addr.county);
+        if (addr.city || addr.town) parts.push(addr.city || addr.town);
+        if (addr.state || addr.province) parts.push(addr.state || addr.province);
+        if (addr.country) parts.push(addr.country);
+
+        return parts.join(', '); // Comma separated for now, can be parsed later for UI
+    } catch (e) {
+        console.error("Geocoding error", e);
+        return '';
+    }
+}
+
 // ==========================================
 // Sub-Components
 // ==========================================
@@ -303,6 +325,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [focalLength, setFocalLength] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [manualLocation, setManualLocation] = useState(false); // Track if user manually edited location
 
   // -----------------------
   // Batch Mode State
@@ -313,7 +336,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [batchLat, setBatchLat] = useState('');
   const [batchLng, setBatchLng] = useState('');
   const [batchLocationName, setBatchLocationName] = useState(''); 
-  
+  const [batchManualLoc, setBatchManualLoc] = useState(false);
+
   // Map logic shared ref
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
@@ -354,6 +378,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setFocalLength(editingPhoto.exif.focalLength || '');
         setLatitude(editingPhoto.exif.latitude ? String(editingPhoto.exif.latitude) : '');
         setLongitude(editingPhoto.exif.longitude ? String(editingPhoto.exif.longitude) : '');
+        setManualLocation(true); // Assuming edited photos have valid locations manually approved
       } else {
         // Reset Single
         setImageUrl(''); setImageDims({width:0,height:0}); setTitle(''); setRating(5);
@@ -361,19 +386,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
         setLatitude(''); setLongitude('');
         setDate(todayStr);
+        setManualLocation(false);
 
         // Reset Batch
         setBatchList([]);
         setBatchCategory(defaultCat);
         setBatchDate(todayStr);
         setBatchLat(''); setBatchLng(''); setBatchLocationName('');
+        setBatchManualLoc(false);
       }
       setResultState({ show: false, success: false, title: '', message: '' });
       setUploadStatus('');
     }
   }, [isOpen, editingPhoto, categories]);
 
-  // Shared Map Initialization
+  // Shared Map Initialization & Geolocation
   useEffect(() => {
     if (!isOpen) {
         if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; }
@@ -391,18 +418,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         const L = (window as any).L;
         if (!L || !mapRef.current) return;
 
-        // Current Active Coords
+        // Current Active Coords (from State)
         let latStr = mode === 'single' ? latitude : batchLat;
         let lngStr = mode === 'single' ? longitude : batchLng;
         
-        // Defaults if empty
-        let center: [number, number] = [35.6895, 139.6917];
+        let center: [number, number] | null = null;
+        
         const latNum = parseFloat(latStr);
         const lngNum = parseFloat(lngStr);
-        if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
+        
+        if (!isNaN(latNum) && !isNaN(lngNum)) {
+             center = [latNum, lngNum];
+        }
 
-        if (!mapInstance.current) {
-            mapInstance.current = L.map(mapRef.current, { center: center, zoom: 2, zoomControl: false, attributionControl: false });
+        const initMap = (startCenter: [number, number]) => {
+            if (mapInstance.current) return; // Already init
+            
+            mapInstance.current = L.map(mapRef.current, { center: startCenter, zoom: 4, zoomControl: false, attributionControl: false });
             const map = mapInstance.current;
             const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
             L.tileLayer(`https://{s}.basemaps.cartocdn.com/${layerStyle}/{z}/{x}/{y}{r}.png`, { maxZoom: 20, subdomains: 'abcd' }).addTo(map);
@@ -413,46 +445,98 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 iconSize: [12, 12], iconAnchor: [6, 6]
             });
             
-            markerInstance.current = L.marker(center, { icon: dotIcon, draggable: true }).addTo(map);
+            markerInstance.current = L.marker(startCenter, { icon: dotIcon, draggable: true }).addTo(map);
             
-            const updateCoords = (lat: number, lng: number) => {
+            const updateCoordsAndAddress = async (lat: number, lng: number) => {
                 const latS = lat.toFixed(6);
                 const lngS = lng.toFixed(6);
+                
                 if (mode === 'single') {
                     setLatitude(latS); setLongitude(lngS);
+                    if (!manualLocation) {
+                        const addr = await fetchAddressFromCoords(lat, lng);
+                        if (addr) setLocation(addr);
+                    }
                 } else {
                     setBatchLat(latS); setBatchLng(lngS);
+                    if (!batchManualLoc) {
+                        const addr = await fetchAddressFromCoords(lat, lng);
+                        if (addr) setBatchLocationName(addr);
+                    }
                 }
             };
 
             markerInstance.current.on('dragend', function(event: any) {
                 const pos = event.target.getLatLng();
-                updateCoords(pos.lat, pos.lng);
+                updateCoordsAndAddress(pos.lat, pos.lng);
             });
             
             map.on('click', function(e: any) {
                 markerInstance.current.setLatLng(e.latlng);
-                updateCoords(e.latlng.lat, e.latlng.lng);
+                updateCoordsAndAddress(e.latlng.lat, e.latlng.lng);
             });
             
-            // Fix map resize issues in modal
             setTimeout(() => { map.invalidateSize(); }, 200);
+        };
 
+        if (center) {
+            initMap(center);
         } else {
-            // Update existing map if coords changed externally (e.g. EXIF loaded)
-            mapInstance.current.invalidateSize();
-            if (!isNaN(latNum) && !isNaN(lngNum)) {
-                // Only pan if distance is significant to avoid jitter
-                const cur = markerInstance.current.getLatLng();
-                if (Math.abs(cur.lat - latNum) > 0.0001 || Math.abs(cur.lng - lngNum) > 0.0001) {
-                    markerInstance.current.setLatLng([latNum, lngNum]);
-                    mapInstance.current.setView([latNum, lngNum], mapInstance.current.getZoom());
-                }
+            // No coords set, try Geolocation
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                        initMap(userCenter);
+                        // Also set the fields? No, user might not want to tag their home immediately.
+                        // But map should center there.
+                        // User prompt says "black dot is at user location default".
+                        // So yes, move marker there but maybe don't set fields until they move it?
+                        // Or set fields immediately. Let's set fields immediately as per "default".
+                        if (mode === 'single' && !latitude) {
+                             setLatitude(pos.coords.latitude.toFixed(6));
+                             setLongitude(pos.coords.longitude.toFixed(6));
+                             // Should we fetch address too?
+                             // Yes, user said "info comes from coords".
+                             if(!manualLocation) {
+                                fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => {
+                                    if(addr) setLocation(addr);
+                                });
+                             }
+                        }
+                    },
+                    (err) => {
+                        console.warn("Geolocation failed", err);
+                        initMap([35.6895, 139.6917]); // Fallback Tokyo
+                    },
+                    { timeout: 5000 }
+                );
+            } else {
+                initMap([35.6895, 139.6917]); // Fallback
             }
         }
+        
     }, 100);
     return () => clearTimeout(timer);
-  }, [isOpen, theme, mode, latitude, longitude, batchLat, batchLng]); // Dependencies to trigger updates
+  }, [isOpen, theme, mode]); // Dependencies
+
+  // Update map marker if coords change externally (e.g. EXIF)
+  useEffect(() => {
+       if (!mapInstance.current || !markerInstance.current) return;
+       const latStr = mode === 'single' ? latitude : batchLat;
+       const lngStr = mode === 'single' ? longitude : batchLng;
+       const lat = parseFloat(latStr);
+       const lng = parseFloat(lngStr);
+       
+       if (!isNaN(lat) && !isNaN(lng)) {
+           const cur = markerInstance.current.getLatLng();
+           if (Math.abs(cur.lat - lat) > 0.0001 || Math.abs(cur.lng - lng) > 0.0001) {
+               markerInstance.current.setLatLng([lat, lng]);
+               mapInstance.current.setView([lat, lng], mapInstance.current.getZoom());
+           }
+       }
+  }, [latitude, longitude, batchLat, batchLng, mode]);
+
 
   // SINGLE: Handle File Selection
   const handleSingleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -472,9 +556,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         if(exif.shutter) setShutter(exif.shutter);
         if(exif.focalLength) setFocalLength(exif.focalLength);
         if(exif.date) setDate(exif.date);
+        
         if(exif.latitude && exif.longitude) {
             setLatitude(String(exif.latitude));
             setLongitude(String(exif.longitude));
+            // Fetch address for EXIF coords
+            const addr = await fetchAddressFromCoords(exif.latitude, exif.longitude);
+            if(addr) {
+                setLocation(addr);
+                setManualLocation(false); // Reset manual flag as this is auto
+            }
         }
       } catch (err) {
         alert("图片处理失败");
@@ -804,7 +895,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                      <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
                      <SmartInput label="ISO" value={iso} onChange={setIso} storageKey="iso" theme={theme} />
                      <div className="col-span-2">
-                        <SmartInput label="地点" value={location} onChange={setLocation} storageKey="location" theme={theme} />
+                        <SmartInput 
+                            label="地点" 
+                            value={location} 
+                            onChange={(val) => { setLocation(val); setManualLocation(true); }} 
+                            storageKey="location" 
+                            theme={theme} 
+                            placeholder="自动获取或手动输入"
+                        />
                      </div>
                   </div>
 
@@ -813,7 +911,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                      <div className="flex justify-between items-center mb-2">
                         <div className="flex items-center gap-2 text-xs opacity-60">
                             <MapPin size={12} />
-                            <span>地理坐标 <span className="text-red-400">*必填</span> (拖动黑点选择)</span>
+                            <span>地理坐标 <span className="text-red-400">*必填</span> (点击或拖动选择，系统自动匹配地名)</span>
                         </div>
                         {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
                      </div>
@@ -858,7 +956,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                          <div>
-                            <SmartInput label="统一地点名称" value={batchLocationName} onChange={setBatchLocationName} storageKey="location" theme={theme} />
+                            <SmartInput 
+                                label="统一地点名称" 
+                                value={batchLocationName} 
+                                onChange={(val) => { setBatchLocationName(val); setBatchManualLoc(true); }} 
+                                storageKey="location" 
+                                theme={theme} 
+                            />
                             <div className="grid grid-cols-2 gap-2 mt-2">
                                 <SmartInput label="纬度" value={batchLat} onChange={setBatchLat} storageKey="gps_lat" placeholder="0.00" theme={theme} />
                                 <SmartInput label="经度" value={batchLng} onChange={setBatchLng} storageKey="gps_lng" placeholder="0.00" theme={theme} />
