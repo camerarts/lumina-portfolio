@@ -179,6 +179,10 @@ const App: React.FC = () => {
   const textPrimary = isDark ? "text-white" : "text-black";
   const textSecondary = isDark ? "text-white/50" : "text-black/50";
 
+  // Common padding logic for Header and Main to ensure alignment
+  const containerPadding = "px-6 md:px-16 lg:px-24";
+  const containerMaxWidth = "max-w-[1600px]";
+
   return (
     <div className={`min-h-screen font-sans selection:bg-gray-500/30 ${textPrimary}`}>
       <Background />
@@ -186,7 +190,7 @@ const App: React.FC = () => {
 
       {/* === Header === */}
       <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 backdrop-blur-md border-b ${isDark ? 'bg-black/80 border-white/5' : 'bg-white/90 border-black/5'}`}>
-          <div className="max-w-[1800px] mx-auto px-4 md:px-8 py-6">
+          <div className={`${containerMaxWidth} mx-auto ${containerPadding} py-6`}>
               
               {/* Row 1: Logo */}
               <div 
@@ -276,22 +280,23 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className={`pt-48 md:pt-56 pb-12 px-4 md:px-8 max-w-[1800px] mx-auto min-h-screen`}>
+      <main className={`pt-48 md:pt-56 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
            <div className={`w-full h-[70vh] rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${isDark ? 'border-white/10' : 'border-black/5'}`}>
              <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
            </div>
         ) : (
           <>
-            <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-8 space-y-8">
+            <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-6">
               {visiblePhotos.map((photo) => (
-                <div key={photo.id} className="break-inside-avoid animate-fade-in group relative mb-8">
+                <div key={photo.id} className="break-inside-avoid animate-fade-in group relative mb-6">
                     {/* Flat Card Design */}
                     <div 
                         onClick={() => handlePhotoClick(photo)}
                         className={`
-                            relative overflow-hidden cursor-zoom-in transition-all duration-700 ease-out
-                            ${isManageMode ? '' : 'hover:shadow-2xl hover:-translate-y-1'}
+                            relative overflow-hidden cursor-zoom-in transition-all duration-700 ease-out rounded-sm
+                            shadow-lg hover:shadow-2xl hover:-translate-y-1 
+                            ${isManageMode ? '' : ''}
                         `}
                     >
                         <img 
