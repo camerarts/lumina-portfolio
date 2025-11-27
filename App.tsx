@@ -190,13 +190,17 @@ const App: React.FC = () => {
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
       {/* === Header === */}
-      {/* Updated Colors: Solid White for Light, Dark Gray for Dark. Distinct Divider. */}
-      <header className={`fixed top-0 left-0 right-0 z-50 transition-colors duration-300 border-b ${isDark ? 'bg-[#141414] border-white/5' : 'bg-white border-gray-100'}`}>
+      {/* 
+        Changed to 'sticky' so it sits in the flow. 
+        The content below will naturally start after it. 
+        'z-50' ensures it stays on top when scrolling.
+      */}
+      <header className={`sticky top-0 left-0 right-0 z-50 transition-colors duration-300 border-b ${isDark ? 'bg-[#141414] border-white/5' : 'bg-white border-gray-100'}`}>
           <div className={`${containerMaxWidth} mx-auto ${containerPadding} py-6`}>
               
               {/* Row 1: Logo */}
               <div 
-                  onClick={() => { setActiveTab('最新'); setActiveCategory(Category.ALL); setViewMode('grid'); window.scrollTo({top:0, behavior:'smooth'}); }}
+                  onClick={() => window.location.reload()}
                   className="font-serif text-3xl md:text-5xl tracking-[0.1em] cursor-pointer select-none font-light mb-6 md:mb-8"
               >
                   LUMINA
@@ -282,7 +286,12 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className={`pt-48 md:pt-56 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
+      {/* 
+        Removed fixed padding (pt-48). 
+        Added mt-6 to match the grid's gap-6 (24px). 
+        Since header is sticky, this creates exactly 24px space between header bottom and content top.
+      */}
+      <main className={`mt-6 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
            <div className={`w-full h-[70vh] rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${isDark ? 'border-white/10' : 'border-black/5'}`}>
              <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
