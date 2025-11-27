@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog } from 'lucide-react';
+import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
@@ -67,6 +67,8 @@ const App: React.FC = () => {
   }, []);
 
   const [activeCategory, setActiveCategory] = useState<string>(Category.ALL);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false); // Dropdown State
+
   const [activeTab, setActiveTab] = useState<string>('最新');
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
 
@@ -102,6 +104,13 @@ const App: React.FC = () => {
       setIsAdmin(true);
     }
   }, []);
+  
+  // Close dropdown on click outside
+  useEffect(() => {
+    const closeDropdown = () => setIsCategoryOpen(false);
+    if(isCategoryOpen) window.addEventListener('click', closeDropdown);
+    return () => window.removeEventListener('click', closeDropdown);
+  }, [isCategoryOpen]);
 
   const handleLoginSuccess = (token: string) => {
     setAdminToken(token);
@@ -418,25 +427,42 @@ const App: React.FC = () => {
           </div>
 
           {/* Right: Filters, Theme, Admin */}
-          <div className="flex items-center justify-between md:justify-end gap-3 overflow-x-auto no-scrollbar">
+          <div className="flex items-center justify-between md:justify-end gap-3 z-50">
             
-            {/* Categories (Compact) */}
-            <div className="flex items-center gap-1">
-              {displayCategories.map((cat) => (
+            {/* Category Dropdown (Replacing Horizontal List) */}
+            <div className="relative">
                 <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={`
-                    px-2 py-1 rounded text-[10px] tracking-wider font-medium whitespace-nowrap transition-all duration-300 ease-liquid
-                    ${activeCategory === cat 
-                      ? (isDark ? 'bg-white text-black' : 'bg-black text-white') 
-                      : (isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-black/50 hover:bg-black/5 hover:text-black')
-                    }
+                   onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }}
+                   className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium tracking-wide transition-all duration-300 ease-liquid
+                     ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-black/5 text-black hover:bg-black/10'}
+                   `}
+                >
+                   {activeCategory}
+                   <ChevronDown size={14} className={`transition-transform duration-300 ${isCategoryOpen ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {/* Dropdown Menu */}
+                <div 
+                  className={`absolute top-full right-0 mt-2 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-xl shadow-2xl border backdrop-blur-xl animate-fade-in origin-top-right transition-all
+                     ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible pointer-events-none'}
+                     ${isDark ? 'bg-black/80 border-white/10' : 'bg-white/80 border-black/5'}
                   `}
                 >
-                  {cat}
-                </button>
-              ))}
+                   {displayCategories.map(cat => (
+                       <button
+                          key={cat}
+                          onClick={() => setActiveCategory(cat)}
+                          className={`w-full text-left px-4 py-2 text-xs transition-colors
+                             ${activeCategory === cat 
+                                ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black')
+                                : (isDark ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-black/70 hover:bg-black/5 hover:text-black')
+                             }
+                          `}
+                       >
+                           {cat}
+                       </button>
+                   ))}
+                </div>
             </div>
 
             {/* Divider */}
