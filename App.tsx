@@ -206,11 +206,17 @@ const App: React.FC = () => {
       case '远方':
         if (userLocation) {
           result = result.sort((a, b) => {
-            const distA = (a.exif.latitude && a.exif.longitude) 
-              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, a.exif.latitude, a.exif.longitude)
+            // Safety check for exif existence
+            const latA = a.exif?.latitude;
+            const lngA = a.exif?.longitude;
+            const latB = b.exif?.latitude;
+            const lngB = b.exif?.longitude;
+
+            const distA = (typeof latA === 'number' && typeof lngA === 'number') 
+              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latA, lngA)
               : 99999; // Put photos without location at the end
-            const distB = (b.exif.latitude && b.exif.longitude) 
-              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, b.exif.latitude, b.exif.longitude)
+            const distB = (typeof latB === 'number' && typeof lngB === 'number') 
+              ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latB, lngB)
               : 99999;
             
             return activeTab === '附近' ? distA - distB : distB - distA;
