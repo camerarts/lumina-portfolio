@@ -473,12 +473,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     e.preventDefault();
     if (!imageUrl) return;
 
-    setLoading(true);
-    setUploadStatus(editingPhoto ? '保存中...' : '上传中...');
-
+    // Check mandatory GPS
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
     const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
+
+    if (!hasGPS) {
+        alert("请设置地理坐标 (必选)");
+        return;
+    }
+
+    setLoading(true);
+    setUploadStatus(editingPhoto ? '保存中...' : '上传中...');
 
     const photoData: Photo = {
       id: editingPhoto ? editingPhoto.id : '',
@@ -490,8 +496,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       rating: rating,
       exif: { 
         camera, lens, aperture, shutterSpeed: shutter, iso, location, date, focalLength,
-        latitude: hasGPS ? latNum : undefined, 
-        longitude: hasGPS ? lngNum : undefined 
+        latitude: latNum, 
+        longitude: lngNum
       }
     };
 
@@ -553,14 +559,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   // BATCH: Submit
   const handleBatchSubmit = async () => {
       if (batchList.length === 0) return;
+
+      const latNum = parseFloat(batchLat);
+      const lngNum = parseFloat(batchLng);
+      const hasCommonGPS = !isNaN(latNum) && !isNaN(lngNum);
+
+      // Validation: If no common GPS set, ensure ALL items have EXIF GPS
+      if (!hasCommonGPS) {
+          const missingGPS = batchList.filter(item => !item.exif.latitude || !item.exif.longitude);
+          if (missingGPS.length > 0) {
+              alert(`存在 ${missingGPS.length} 张图片缺少地理坐标。请在地图上设定统一坐标，或确保所有图片含有GPS信息。`);
+              return;
+          }
+      }
       
       setLoading(true);
       let successCount = 0;
       let failCount = 0;
-
-      const latNum = parseFloat(batchLat);
-      const lngNum = parseFloat(batchLng);
-      const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
 
       // Clone list to update status in place
       const queue = [...batchList];
@@ -592,8 +607,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       ...item.exif, // Keep camera/lens/iso/shutter from file
                       date: batchDate || item.exif.date, // Override date if set
                       location: batchLocationName || item.exif.location,
-                      latitude: hasGPS ? latNum : item.exif.latitude,
-                      longitude: hasGPS ? lngNum : item.exif.longitude
+                      latitude: hasCommonGPS ? latNum : item.exif.latitude,
+                      longitude: hasCommonGPS ? lngNum : item.exif.longitude
                   }
               };
 
@@ -787,7 +802,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                      <div className="flex justify-between items-center mb-2">
                         <div className="flex items-center gap-2 text-xs opacity-60">
                             <MapPin size={12} />
-                            <span>地理坐标 (拖动黑点修改)</span>
+                            <span>地理坐标 <span className="text-red-400">*必填</span> (拖动黑点选择)</span>
                         </div>
                         {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
                      </div>
