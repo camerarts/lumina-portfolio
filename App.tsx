@@ -184,89 +184,94 @@ const App: React.FC = () => {
       <Background />
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
-      {/* === Floating Dynamic Island Navigation === */}
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in w-full max-w-2xl px-4">
-          <div className={`
-              w-full h-14 rounded-full flex items-center justify-between px-2 pl-6 shadow-2xl backdrop-blur-xl transition-all duration-500
-              ${isDark ? 'bg-black/80 border border-white/10' : 'bg-white/80 border border-black/5'}
-          `}>
-              {/* Logo / Home */}
+      {/* === Classic Sticky Header (High-End Flat) === */}
+      <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 backdrop-blur-md border-b ${isDark ? 'bg-black/80 border-white/5' : 'bg-white/90 border-black/5'}`}>
+          <div className="max-w-[1600px] mx-auto px-4 md:px-8 h-16 md:h-20 flex items-center justify-between">
+              
+              {/* Logo Area */}
               <div 
-                onClick={() => { setActiveTab('最新'); setActiveCategory(Category.ALL); setViewMode('grid'); window.scrollTo({top:0, behavior:'smooth'}); }}
-                className="font-serif text-lg tracking-widest cursor-pointer select-none"
+                  onClick={() => { setActiveTab('最新'); setActiveCategory(Category.ALL); setViewMode('grid'); window.scrollTo({top:0, behavior:'smooth'}); }}
+                  className="font-serif text-xl tracking-[0.2em] cursor-pointer select-none font-light"
               >
                   LUMINA
               </div>
 
-              {/* Center Tabs (Desktop) */}
-              <div className="hidden md:flex items-center gap-1 absolute left-1/2 -translate-x-1/2">
+              {/* Desktop Tabs Center */}
+              <nav className="hidden md:flex items-center gap-6">
                   {FEED_TABS.map(tab => (
                     <button
                         key={tab}
                         onClick={() => handleTabClick(tab)}
-                        className={`px-3 py-1.5 rounded-full text-xs transition-all ${activeTab === tab ? (isDark ? 'bg-white text-black font-medium' : 'bg-black text-white font-medium') : 'opacity-50 hover:opacity-100'}`}
+                        className={`text-xs uppercase tracking-widest py-2 transition-all relative group
+                            ${activeTab === tab ? 'opacity-100 font-medium' : 'opacity-40 hover:opacity-80'}
+                        `}
                     >
                         {tab}
+                        {/* Underline Indicator */}
+                        <span className={`absolute bottom-0 left-0 h-[1px] bg-current transition-all duration-300
+                            ${activeTab === tab ? 'w-full' : 'w-0 group-hover:w-1/2'}
+                        `}/>
                     </button>
                   ))}
-              </div>
+              </nav>
 
               {/* Right Controls */}
-              <div className="flex items-center gap-2">
-                  
-                  {/* Category Dropdown */}
-                  <div className="relative">
-                        <button onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-black/5 hover:bg-black/10'}`}>
+              <div className="flex items-center gap-3">
+                   {/* Category Dropdown */}
+                   <div className="relative">
+                        <button onClick={(e) => { e.stopPropagation(); setIsCategoryOpen(!isCategoryOpen); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${isDark ? 'border-white/10 hover:border-white/30' : 'border-black/10 hover:border-black/30'}`}>
                             {activeCategory === Category.ALL ? '分类' : activeCategory}
-                            <ChevronDown size={12} className={`transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} />
+                            <ChevronDown size={10} className={`transition-transform duration-300 ${isCategoryOpen ? 'rotate-180' : ''}`} />
                         </button>
-                        <div className={`absolute top-full right-0 mt-3 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-xl shadow-xl border backdrop-blur-xl p-1 transition-all origin-top-right ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'} ${isDark ? 'bg-black/90 border-white/10' : 'bg-white/90 border-black/5'}`}>
+                        <div className={`absolute top-full right-0 mt-2 w-40 max-h-64 overflow-y-auto custom-scrollbar rounded-lg shadow-2xl border p-1 transition-all origin-top-right ${isCategoryOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'} ${isDark ? 'bg-black/90 border-white/10' : 'bg-white/95 border-black/5'}`}>
                             {displayCategories.map(cat => (
-                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${activeCategory === cat ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black') : 'opacity-70 hover:opacity-100 hover:bg-white/5'}`}>
+                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors ${activeCategory === cat ? (isDark ? 'bg-white/20 text-white' : 'bg-black/10 text-black') : 'opacity-60 hover:opacity-100 hover:bg-white/5'}`}>
                                     {cat}
                                 </button>
                             ))}
                         </div>
                    </div>
-                   
-                   {/* Map Toggle */}
-                   <button onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${viewMode === 'map' ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : 'opacity-50 hover:opacity-100'}`}>
-                       <Globe size={14} />
+
+                   {/* Map/Grid Toggle */}
+                   <button onClick={() => setViewMode(v => v === 'grid' ? 'map' : 'grid')} className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${viewMode === 'map' ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : 'opacity-50 hover:opacity-100 hover:bg-white/5'}`}>
+                       <Globe size={16} strokeWidth={1.5} />
                    </button>
 
-                   {/* Admin Toggle */}
+                   {/* Theme Toggle */}
+                   <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors">
+                       {isDark ? <Moon size={16} strokeWidth={1.5} /> : <Sun size={16} strokeWidth={1.5} />}
+                   </button>
+
+                   {/* Admin Actions */}
                    {isAdmin ? (
-                        <div className="flex items-center gap-2 border-l pl-2 ml-1 border-gray-500/20">
-                            <button onClick={() => setIsManageMode(!isManageMode)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isManageMode ? 'bg-blue-500 text-white' : 'opacity-50 hover:opacity-100'}`} title="管理"><Pencil size={14} /></button>
-                            <button onClick={() => {setPhotoToEdit(null); setIsUploadOpen(true);}} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="上传"><Plus size={16} /></button>
-                            <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="设置"><Cog size={14} /></button>
-                            <button onClick={handleLogout} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors" title="退出"><LogOut size={14} /></button>
+                        <div className={`flex items-center gap-2 border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                            <button onClick={() => setIsManageMode(!isManageMode)} className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${isManageMode ? 'bg-blue-500 text-white' : 'opacity-50 hover:opacity-100 hover:bg-white/5'}`} title="管理"><Pencil size={16} strokeWidth={1.5} /></button>
+                            <button onClick={() => {setPhotoToEdit(null); setIsUploadOpen(true);}} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="上传"><Plus size={18} strokeWidth={1.5} /></button>
+                            <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="设置"><Cog size={16} strokeWidth={1.5} /></button>
+                            <button onClick={handleLogout} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors" title="退出"><LogOut size={16} strokeWidth={1.5} /></button>
                         </div>
                    ) : (
-                        <button onClick={() => setIsLoginOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors"><Settings size={14} /></button>
+                        <div className={`border-l pl-3 ml-1 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                           <button onClick={() => setIsLoginOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-white/5 transition-colors"><Settings size={16} strokeWidth={1.5} /></button>
+                        </div>
                    )}
-                   
-                   {/* Theme */}
-                   <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-8 h-8 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-colors">
-                       {isDark ? <Moon size={14} /> : <Sun size={14} />}
-                   </button>
               </div>
           </div>
-          
-          {/* Mobile Tabs Row (Below Pill) */}
-          <div className="md:hidden mt-4 flex justify-center gap-4 overflow-x-auto pb-2 no-scrollbar">
+
+          {/* Mobile Tabs Row */}
+          <div className="md:hidden flex justify-center gap-6 pb-3 border-b border-transparent">
                {FEED_TABS.map(tab => (
-                 <button key={tab} onClick={() => handleTabClick(tab)} className={`text-xs uppercase tracking-widest transition-colors ${activeTab === tab ? (isDark ? 'text-white border-b border-white' : 'text-black border-b border-black') : 'opacity-40'}`}>
+                 <button key={tab} onClick={() => handleTabClick(tab)} className={`text-[10px] uppercase tracking-widest transition-colors ${activeTab === tab ? 'opacity-100 font-medium border-b border-current' : 'opacity-40'}`}>
                      {tab}
                  </button>
                ))}
           </div>
-      </div>
+      </header>
 
       {/* Main Content Area */}
       <main className={`pt-24 md:pt-32 pb-12 px-4 md:px-8 max-w-[1600px] mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
-           <div className="w-full h-[80vh] rounded-3xl overflow-hidden border border-gray-500/10 shadow-2xl">
+           <div className={`w-full h-[80vh] rounded-2xl overflow-hidden border shadow-lg ${isDark ? 'border-white/10' : 'border-black/5'}`}>
              <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
            </div>
         ) : (
