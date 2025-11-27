@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle } from 'lucide-react';
-import { Category, Photo, Theme } from '../types';
+import { Category, Photo, Theme, DEFAULT_CATEGORIES } from '../types';
 import { GlassCard } from './GlassCard';
 import EXIF from 'exif-js';
 import { client } from '../api/client';
@@ -39,6 +39,7 @@ interface UploadModalProps {
   theme: Theme;
   editingPhoto?: Photo | null;
   token: string;
+  categories?: string[]; // Prop for dynamic categories
 }
 
 interface ProcessedImage {
@@ -250,7 +251,10 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
 // Main Component
 // ==========================================
 
-export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, theme, editingPhoto, token }) => {
+export const UploadModal: React.FC<UploadModalProps> = ({ 
+    isOpen, onClose, onUpload, theme, editingPhoto, token, 
+    categories = DEFAULT_CATEGORIES // Default fallback
+}) => {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>(''); // Text status
@@ -269,7 +273,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   const [imageUrl, setImageUrl] = useState<string>('');
   const [imageDims, setImageDims] = useState<{width: number, height: number}>({ width: 0, height: 0 });
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<Category>(Category.LANDSCAPE);
+  const [category, setCategory] = useState<string>(categories[0]);
   const [rating, setRating] = useState(5);
   
   const [camera, setCamera] = useState('');
@@ -287,11 +291,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   // Batch Mode State
   // -----------------------
   const [batchList, setBatchList] = useState<BatchItem[]>([]);
-  const [batchCategory, setBatchCategory] = useState<Category>(Category.LANDSCAPE);
+  const [batchCategory, setBatchCategory] = useState<string>(categories[0]);
   const [batchDate, setBatchDate] = useState('');
   const [batchLat, setBatchLat] = useState('');
   const [batchLng, setBatchLng] = useState('');
-  const [batchLocationName, setBatchLocationName] = useState(''); // Just for common input
+  const [batchLocationName, setBatchLocationName] = useState(''); 
   
   // Map logic shared ref
   const mapRef = useRef<HTMLDivElement>(null);
@@ -312,11 +316,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
       const dd = String(today.getDate()).padStart(2, '0');
       const todayStr = `${yyyy}-${mm}-${dd}`;
 
+      // Reset Category if it doesn't match available options (optional safety)
+      const defaultCat = categories[0] || '默认';
+
       if (editingPhoto) {
         setMode('single');
         setImageUrl(editingPhoto.url);
         setTitle(editingPhoto.title);
-        setCategory(editingPhoto.category);
+        setCategory(editingPhoto.category || defaultCat);
         setRating(editingPhoto.rating || 0);
         setImageDims({ width: editingPhoto.width || 0, height: editingPhoto.height || 0 });
         
@@ -333,20 +340,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
       } else {
         // Reset Single
         setImageUrl(''); setImageDims({width:0,height:0}); setTitle(''); setRating(5);
+        setCategory(defaultCat);
         setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
         setLatitude(''); setLongitude('');
         setDate(todayStr);
 
         // Reset Batch
         setBatchList([]);
-        setBatchCategory(Category.LANDSCAPE);
+        setBatchCategory(defaultCat);
         setBatchDate(todayStr);
         setBatchLat(''); setBatchLng(''); setBatchLocationName('');
       }
       setResultState({ show: false, success: false, title: '', message: '' });
       setUploadStatus('');
     }
-  }, [isOpen, editingPhoto]);
+  }, [isOpen, editingPhoto, categories]);
 
   // Shared Map Initialization
   useEffect(() => {
@@ -572,10 +580,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
               // 1. Title defaults to filename without extension
               const title = item.file.name.replace(/\.[^/.]+$/, "");
               
-              // 2. EXIF defaults to extracted, override with common location if not present?
-              // Prompt says: "Batch upload photos info [Category, GPS, Date] can only be set uniformly"
-              // This implies we FORCE the common settings onto these photos.
-              
               const photoData: Photo = {
                   id: '',
                   url: '',
@@ -586,7 +590,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                   height: item.height,
                   exif: {
                       ...item.exif, // Keep camera/lens/iso/shutter from file
-                      date: batchDate || item.exif.date, // Override date if set? "Can only be set uniformly" usually means Override.
+                      date: batchDate || item.exif.date, // Override date if set
                       location: batchLocationName || item.exif.location,
                       latitude: hasGPS ? latNum : item.exif.latitude,
                       longitude: hasGPS ? lngNum : item.exif.longitude
@@ -649,9 +653,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                                      setImageUrl(''); setTitle(''); setUploadStatus('');
                                      // Keep category/location as they might be repetitive
                                  } else {
-                                     // If editing, 'Continue' might just mean close or stay?
-                                     // Usually 'Close' is enough for edit.
-                                     // Let's allow 'Close' to be the primary action for edit.
                                      onClose();
                                  }
                              }}
@@ -746,8 +747,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                   </div>
                   <div>
                     <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>作品分类</label>
-                    <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
-                      {Object.values(Category).filter(c => c !== Category.ALL && c !== Category.HORIZONTAL && c !== Category.VERTICAL).map(c => (<option key={c} value={c}>{c}</option>))}
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
+                      {categories.map(c => (<option key={c} value={c}>{c}</option>))}
                     </select>
                   </div>
                 </div>
@@ -820,8 +821,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>统一分类</label>
-                            <select value={batchCategory} onChange={(e) => setBatchCategory(e.target.value as Category)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
-                                {Object.values(Category).filter(c => c !== Category.ALL && c !== Category.HORIZONTAL && c !== Category.VERTICAL).map(c => (<option key={c} value={c}>{c}</option>))}
+                            <select value={batchCategory} onChange={(e) => setBatchCategory(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
+                                {categories.map(c => (<option key={c} value={c}>{c}</option>))}
                             </select>
                         </div>
                         <div>
