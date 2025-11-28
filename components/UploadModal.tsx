@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle } from 'lucide-react';
+import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
 import EXIF from 'exif-js';
@@ -43,13 +43,6 @@ interface UploadModalProps {
   categories?: string[]; // Prop for dynamic categories
 }
 
-interface ProcessedImage {
-  base64: string;
-  width: number;
-  height: number;
-  exif: any;
-}
-
 // ==========================================
 // Helper Functions
 // ==========================================
@@ -72,13 +65,10 @@ const compressImage = (file: File): Promise<string> => {
         if (width > height) { width = MAX_DIMENSION; height = width / ratio; } 
         else { height = MAX_DIMENSION; width = height * ratio; }
       }
-      if (file.size <= maxSizeInBytes && !needsResize) {
-         const reader = new FileReader();
-         reader.onload = (e) => resolve(e.target?.result as string);
-         reader.onerror = reject;
-         reader.readAsDataURL(file);
-         return;
-      }
+      
+      // If already small enough and no resize needed, allow it (but we usually want to standardize format to JPEG)
+      // However, to ensure consistency and R2 performance, let's always compress large raw inputs.
+      
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -87,7 +77,9 @@ const compressImage = (file: File): Promise<string> => {
       ctx.drawImage(img, 0, 0, width, height);
       let quality = 0.9;
       let dataUrl = canvas.toDataURL('image/jpeg', quality);
-      const maxStringLength = maxSizeInBytes * 1.37;
+      
+      // Binary Search-ish reduction
+      const maxStringLength = maxSizeInBytes * 1.37; // Approx base64 length for 2MB
       while (dataUrl.length > maxStringLength && quality > 0.3) {
          quality -= 0.1;
          dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -155,9 +147,9 @@ const extractExif = (file: File): Promise<any> => {
   });
 };
 
-const processImageFile = async (file: File): Promise<ProcessedImage> => {
+const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
+   // This is used for Batch Mode mainly
    const [base64, exif] = await Promise.all([compressImage(file), extractExif(file)]);
-   // Get dims from base64
    return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -180,14 +172,13 @@ const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string>
         const addr = data.address;
         if (!addr) return '';
         
-        // Construct hierarchal string: District/County | City | Province | Country
         const parts = [];
         if (addr.district || addr.county) parts.push(addr.district || addr.county);
         if (addr.city || addr.town) parts.push(addr.city || addr.town);
         if (addr.state || addr.province) parts.push(addr.state || addr.province);
         if (addr.country) parts.push(addr.country);
 
-        return parts.join(', '); // Comma separated for now, can be parsed later for UI
+        return parts.join(', ');
     } catch (e) {
         console.error("Geocoding error", e);
         return '';
@@ -233,7 +224,6 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
     localStorage.setItem(`lumina_history_${storageKey}`, JSON.stringify(newHistory));
   };
 
-  // Combine Presets (Suggestions) and History, removing duplicates
   const allOptions = Array.from(new Set([...suggestions, ...history]));
 
   const inputClass = isDark 
@@ -277,7 +267,6 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
               onClick={() => { onChange(item); setShowHistory(false); }}
             >
               <span className="truncate flex-1">{item}</span>
-              {/* Only show delete for history items, not managed presets */}
               {history.includes(item) && !suggestions.includes(item) && (
                 <button 
                     onClick={(e) => deleteFromHistory(e, item)}
@@ -300,18 +289,26 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
 
 export const UploadModal: React.FC<UploadModalProps> = ({ 
     isOpen, onClose, onUpload, theme, editingPhoto, token, 
-    categories = DEFAULT_CATEGORIES // Default fallback
+    categories = DEFAULT_CATEGORIES 
 }) => {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [loading, setLoading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<string>(''); // Text status
+  const [uploadStatus, setUploadStatus] = useState<string>(''); 
   const [presets, setPresets] = useState<Presets>({ cameras: [], lenses: [] });
 
   // -----------------------
   // Single Mode State
   // -----------------------
-  const [imageUrl, setImageUrl] = useState<string>('');
+  // Raw file state
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [originalPreview, setOriginalPreview] = useState<string>('');
+  const [compressedPreview, setCompressedPreview] = useState<string>('');
+  
+  // Photo Data State
+  const [uploadedPhotoId, setUploadedPhotoId] = useState<string>(''); // If processed and uploaded
+  const [imageUrl, setImageUrl] = useState<string>(''); // Final URL
   const [imageDims, setImageDims] = useState<{width: number, height: number}>({ width: 0, height: 0 });
+  
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string>(categories[0]);
   const [rating, setRating] = useState(5);
@@ -326,30 +323,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [focalLength, setFocalLength] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
-  const [manualLocation, setManualLocation] = useState(false); // Track if user manually edited location
+  const [manualLocation, setManualLocation] = useState(false);
 
-  // Fetch presets on open and set defaults if not editing
-  useEffect(() => {
-      if (isOpen) {
-          client.getPresets().then(p => {
-              if(p) {
-                  setPresets(p);
-                  // Apply defaults if empty and not editing (Single Mode)
-                  if (!editingPhoto && mode === 'single') {
-                      setCamera(prev => prev || (p.cameras && p.cameras[0]) || '');
-                      setLens(prev => prev || (p.lenses && p.lenses[0]) || '');
-                  }
-              }
-          });
-      }
-  }, [isOpen, editingPhoto, mode]);
-  
   // Result Overlay State
   const [resultState, setResultState] = useState<{
-      show: boolean;
-      success: boolean;
-      title: string;
-      message: string;
+      show: boolean; success: boolean; title: string; message: string;
   }>({ show: false, success: false, title: '', message: '' });
 
   // -----------------------
@@ -363,7 +341,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [batchLocationName, setBatchLocationName] = useState(''); 
   const [batchManualLoc, setBatchManualLoc] = useState(false);
 
-  // Map logic shared ref
+  // Map Refs
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markerInstance = useRef<any>(null);
@@ -375,19 +353,32 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   // Init
   useEffect(() => {
     if (isOpen) {
-      // Defaults
       const today = new Date();
       const yyyy = today.getFullYear();
       const mm = String(today.getMonth() + 1).padStart(2, '0');
       const dd = String(today.getDate()).padStart(2, '0');
       const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      // Reset Category if it doesn't match available options (optional safety)
       const defaultCat = categories[0] || '默认';
+
+      client.getPresets().then(p => {
+        if(p) {
+            setPresets(p);
+            // Apply defaults if new upload
+            if (!editingPhoto && mode === 'single') {
+                setCamera(prev => prev || (p.cameras && p.cameras[0]) || '');
+                setLens(prev => prev || (p.lenses && p.lenses[0]) || '');
+            }
+        }
+      });
 
       if (editingPhoto) {
         setMode('single');
+        setOriginalFile(null);
+        setOriginalPreview('');
+        setCompressedPreview(editingPhoto.url); // Use existing URL as preview
+        setUploadedPhotoId(editingPhoto.id);
         setImageUrl(editingPhoto.url);
+        
         setTitle(editingPhoto.title);
         setCategory(editingPhoto.category || defaultCat);
         setRating(editingPhoto.rating || 0);
@@ -403,10 +394,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setFocalLength(editingPhoto.exif.focalLength || '');
         setLatitude(editingPhoto.exif.latitude ? String(editingPhoto.exif.latitude) : '');
         setLongitude(editingPhoto.exif.longitude ? String(editingPhoto.exif.longitude) : '');
-        setManualLocation(true); // Assuming edited photos have valid locations manually approved
+        setManualLocation(true); 
       } else {
         // Reset Single
-        setImageUrl(''); setImageDims({width:0,height:0}); setTitle(''); setRating(5);
+        setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl('');
+        setImageDims({width:0,height:0}); setTitle(''); setRating(5);
         setCategory(defaultCat);
         setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
         setLatitude(''); setLongitude('');
@@ -425,39 +417,33 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   }, [isOpen, editingPhoto, categories]);
 
-  // Shared Map Initialization & Geolocation
+  // Map Initialization
   useEffect(() => {
     if (!isOpen) {
         if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; }
         return;
     }
     
-    // Check for container mismatch (happens when switching modes)
     if (mapInstance.current && mapRef.current && mapInstance.current.getContainer() !== mapRef.current) {
          mapInstance.current.remove();
          mapInstance.current = null;
     }
 
-    // Delay slightly to allow DOM to render
     const timer = setTimeout(() => {
         const L = (window as any).L;
         if (!L || !mapRef.current) return;
 
-        // Current Active Coords (from State)
         let latStr = mode === 'single' ? latitude : batchLat;
         let lngStr = mode === 'single' ? longitude : batchLng;
-        
         let center: [number, number] | null = null;
         
         const latNum = parseFloat(latStr);
         const lngNum = parseFloat(lngStr);
         
-        if (!isNaN(latNum) && !isNaN(lngNum)) {
-             center = [latNum, lngNum];
-        }
+        if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
 
         const initMap = (startCenter: [number, number]) => {
-            if (mapInstance.current) return; // Already init
+            if (mapInstance.current) return;
             
             mapInstance.current = L.map(mapRef.current, { center: startCenter, zoom: 4, zoomControl: false, attributionControl: false });
             const map = mapInstance.current;
@@ -491,12 +477,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 }
             };
 
-            markerInstance.current.on('dragend', function(event: any) {
+            markerInstance.current.on('dragend', (event: any) => {
                 const pos = event.target.getLatLng();
                 updateCoordsAndAddress(pos.lat, pos.lng);
             });
             
-            map.on('click', function(e: any) {
+            map.on('click', (e: any) => {
                 markerInstance.current.setLatLng(e.latlng);
                 updateCoordsAndAddress(e.latlng.lat, e.latlng.lng);
             });
@@ -506,46 +492,34 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
         if (center) {
             initMap(center);
+        } else if (navigator.geolocation) {
+             navigator.geolocation.getCurrentPosition(
+                 (pos) => {
+                     const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                     initMap(userCenter);
+                     // Set default user location if empty
+                     if (mode === 'single' && !latitude) {
+                         setLatitude(pos.coords.latitude.toFixed(6));
+                         setLongitude(pos.coords.longitude.toFixed(6));
+                         if(!manualLocation) {
+                            fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => {
+                                if(addr) setLocation(addr);
+                            });
+                         }
+                     }
+                 },
+                 (err) => initMap([35.6895, 139.6917]),
+                 { timeout: 5000 }
+             );
         } else {
-            // No coords set, try Geolocation
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => {
-                        const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-                        initMap(userCenter);
-                        // Also set the fields? No, user might not want to tag their home immediately.
-                        // But map should center there.
-                        // User prompt says "black dot is at user location default".
-                        // So yes, move marker there but maybe don't set fields until they move it?
-                        // Or set fields immediately. Let's set fields immediately as per "default".
-                        if (mode === 'single' && !latitude) {
-                             setLatitude(pos.coords.latitude.toFixed(6));
-                             setLongitude(pos.coords.longitude.toFixed(6));
-                             // Should we fetch address too?
-                             // Yes, user said "info comes from coords".
-                             if(!manualLocation) {
-                                fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => {
-                                    if(addr) setLocation(addr);
-                                });
-                             }
-                        }
-                    },
-                    (err) => {
-                        console.warn("Geolocation failed", err);
-                        initMap([35.6895, 139.6917]); // Fallback Tokyo
-                    },
-                    { timeout: 5000 }
-                );
-            } else {
-                initMap([35.6895, 139.6917]); // Fallback
-            }
+            initMap([35.6895, 139.6917]);
         }
         
     }, 100);
     return () => clearTimeout(timer);
-  }, [isOpen, theme, mode]); // Dependencies
+  }, [isOpen, theme, mode]);
 
-  // Update map marker if coords change externally (e.g. EXIF)
+  // Update map marker
   useEffect(() => {
        if (!mapInstance.current || !markerInstance.current) return;
        const latStr = mode === 'single' ? latitude : batchLat;
@@ -563,18 +537,37 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   }, [latitude, longitude, batchLat, batchLng, mode]);
 
 
-  // SINGLE: Handle File Selection
-  const handleSingleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // SINGLE: Handle File Selection (Instant Preview)
+  const handleSingleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setLoading(true);
-      setUploadStatus('解析图片中...');
-      try {
-        const { base64, width, height, exif } = await processImageFile(file);
-        setImageUrl(base64);
-        setImageDims({ width, height });
+      setOriginalFile(file);
+      // Create Object URL for instant preview (zero lag)
+      setOriginalPreview(URL.createObjectURL(file));
+      // Reset subsequent states
+      setCompressedPreview('');
+      setUploadedPhotoId('');
+      setImageUrl('');
+    }
+  };
+
+  // SINGLE: Process, Compress, Extract EXIF & Upload
+  const handleProcessAndUpload = async () => {
+    if (!originalFile) return;
+    
+    setLoading(true);
+    setUploadStatus('解析压缩中...');
+    
+    try {
+        // 1. Compress Image
+        const compressedBase64 = await compressImage(originalFile);
+        setCompressedPreview(compressedBase64);
         
-        // Auto-fill EXIF fields
+        // 2. Extract EXIF from ORIGINAL file (best data)
+        setUploadStatus('提取EXIF信息...');
+        const exif = await extractExif(originalFile);
+
+        // Fill form fields
         if(exif.camera) setCamera(exif.camera);
         if(exif.iso) setIso(exif.iso);
         if(exif.aperture) setAperture(exif.aperture);
@@ -585,28 +578,54 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         if(exif.latitude && exif.longitude) {
             setLatitude(String(exif.latitude));
             setLongitude(String(exif.longitude));
-            // Fetch address for EXIF coords
             const addr = await fetchAddressFromCoords(exif.latitude, exif.longitude);
             if(addr) {
                 setLocation(addr);
-                setManualLocation(false); // Reset manual flag as this is auto
+                setManualLocation(false);
             }
+        } else {
+             // If no EXIF GPS, keep current (user loc) or reset?
+             // Keep current as user might have geolocation active
         }
-      } catch (err) {
-        alert("图片处理失败");
-      } finally {
+
+        // Get Dimensions
+        const img = new Image();
+        img.src = compressedBase64;
+        await new Promise(r => img.onload = r);
+        setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+
+        // 3. Upload to Cloud
+        setUploadStatus('上传到云端...');
+        // Create a temp photo object for upload
+        const tempPhotoData: Photo = {
+            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: img.naturalWidth, height: img.naturalHeight, exif: {} as any
+        };
+        
+        const result = await client.uploadPhoto(compressedBase64, tempPhotoData, token);
+        setUploadedPhotoId(result.id);
+        setImageUrl(result.url); // Remote URL
+        
+        // Use filename as title if empty
+        if (!title) setTitle(originalFile.name.replace(/\.[^/.]+$/, ""));
+
+        setUploadStatus('');
+
+    } catch (err) {
+        console.error(err);
+        alert("处理或上传失败，请重试");
+    } finally {
         setLoading(false);
         setUploadStatus('');
-      }
     }
   };
 
-  // SINGLE: Handle Submit
-  const handleSingleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!imageUrl) return;
 
-    // Check mandatory GPS
+  // SINGLE: Handle Final Save (Metadata Update)
+  const handleSaveInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!imageUrl && !editingPhoto) return;
+
+    // Validation
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
     const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
@@ -617,11 +636,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
 
     setLoading(true);
-    setUploadStatus(editingPhoto ? '保存中...' : '上传中...');
+    setUploadStatus('保存信息...');
 
     const photoData: Photo = {
-      id: editingPhoto ? editingPhoto.id : '',
-      url: editingPhoto ? editingPhoto.url : '',
+      id: editingPhoto ? editingPhoto.id : uploadedPhotoId,
+      url: imageUrl, // Use the remote URL (R2)
       title: title || '未命名作品',
       category: category,
       width: imageDims.width,
@@ -635,13 +654,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     };
 
     try {
+      // Re-call uploadPhoto with the remote URL (not base64) to trigger metadata update
+      // The client handles non-base64 strings as metadata-only updates
       const result = await client.uploadPhoto(imageUrl, photoData, token);
       onUpload(result); 
       setResultState({
           show: true,
           success: true,
-          title: editingPhoto ? '修改成功' : '上传成功',
-          message: editingPhoto ? '作品信息已更新。' : '作品已成功发布到作品集。'
+          title: editingPhoto ? '修改成功' : '发布成功',
+          message: editingPhoto ? '作品信息已更新。' : '作品及信息已成功发布。'
       });
     } catch (err: any) {
       setResultState({
@@ -656,164 +677,97 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   };
 
-  // BATCH: Handle File Selection
+  // BATCH... (Kept mostly same, but using processImageFile helper)
   const handleBatchFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files) return;
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
-
       const newItems: BatchItem[] = [];
-      
       for (const file of files) {
           const id = Math.random().toString(36).substr(2, 9);
           try {
              const { base64, width, height, exif } = await processImageFile(file);
-             newItems.push({
-                 id, file, status: 'pending', thumbnail: base64, width, height, exif
-             });
-          } catch (e) {
-              console.error("Skipped file", file.name);
-          }
+             newItems.push({ id, file, status: 'pending', thumbnail: base64, width, height, exif });
+          } catch (e) {}
       }
       setBatchList(prev => [...prev, ...newItems]);
   };
 
-  // BATCH: Remove item
-  const removeBatchItem = (id: string) => {
-      setBatchList(prev => prev.filter(i => i.id !== id));
-  };
+  const removeBatchItem = (id: string) => setBatchList(prev => prev.filter(i => i.id !== id));
 
-  // BATCH: Submit
   const handleBatchSubmit = async () => {
       if (batchList.length === 0) return;
-
       const latNum = parseFloat(batchLat);
       const lngNum = parseFloat(batchLng);
       const hasCommonGPS = !isNaN(latNum) && !isNaN(lngNum);
 
-      // Validation: If no common GPS set, ensure ALL items have EXIF GPS
       if (!hasCommonGPS) {
           const missingGPS = batchList.filter(item => !item.exif.latitude || !item.exif.longitude);
           if (missingGPS.length > 0) {
-              alert(`存在 ${missingGPS.length} 张图片缺少地理坐标。请在地图上设定统一坐标，或确保所有图片含有GPS信息。`);
+              alert(`存在 ${missingGPS.length} 张图片缺少地理坐标。请在地图上设定统一坐标。`);
               return;
           }
       }
-      
       setLoading(true);
-      let successCount = 0;
-      let failCount = 0;
-
-      // Clone list to update status in place
+      let successCount = 0; let failCount = 0;
       const queue = [...batchList];
 
       for (let i = 0; i < queue.length; i++) {
           const item = queue[i];
-          if (item.status === 'success') {
-              successCount++;
-              continue; // Skip already done
-          }
-
-          // Update Status -> Uploading
+          if (item.status === 'success') { successCount++; continue; }
           setBatchList(prev => prev.map(p => p.id === item.id ? { ...p, status: 'uploading' } : p));
-          
           try {
-              // Prepare Data
-              // 1. Title defaults to filename without extension
               const title = item.file.name.replace(/\.[^/.]+$/, "");
-              
               const photoData: Photo = {
-                  id: '',
-                  url: '',
-                  title: title,
-                  category: batchCategory,
-                  rating: 5,
-                  width: item.width,
-                  height: item.height,
+                  id: '', url: '', title: title, category: batchCategory, rating: 5, width: item.width, height: item.height,
                   exif: {
-                      ...item.exif, // Keep camera/lens/iso/shutter from file
-                      date: batchDate || item.exif.date, // Override date if set
+                      ...item.exif,
+                      date: batchDate || item.exif.date,
                       location: batchLocationName || item.exif.location,
                       latitude: hasCommonGPS ? latNum : item.exif.latitude,
                       longitude: hasCommonGPS ? lngNum : item.exif.longitude
                   }
               };
-
               const result = await client.uploadPhoto(item.thumbnail, photoData, token);
-              
-              // Notify App
               onUpload(result);
-              
               setBatchList(prev => prev.map(p => p.id === item.id ? { ...p, status: 'success' } : p));
               successCount++;
           } catch (err: any) {
-              console.error(err);
               setBatchList(prev => prev.map(p => p.id === item.id ? { ...p, status: 'error', errorMsg: err.message } : p));
               failCount++;
           }
       }
-
       setLoading(false);
-      setResultState({
-          show: true,
-          success: failCount === 0,
-          title: '批量上传完成',
-          message: `成功: ${successCount} 张，失败: ${failCount} 张。`
-      });
+      setResultState({ show: true, success: failCount === 0, title: '批量上传完成', message: `成功: ${successCount} 张，失败: ${failCount} 张。` });
   };
 
-  // Result Overlay Content
   const ResultOverlay = () => {
       if (!resultState.show) return null;
-      
-      const isSuccess = resultState.success;
-      
       return (
           <div className={`absolute inset-0 z-50 flex items-center justify-center p-6 animate-fade-in backdrop-blur-md ${isDark ? 'bg-black/80' : 'bg-white/80'}`}>
               <GlassCard className="w-full max-w-sm p-8 text-center" hoverEffect={false} theme={theme}>
-                  <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${isSuccess ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-                      {isSuccess ? <Check size={32} /> : <AlertCircle size={32} />}
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${resultState.success ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
+                      {resultState.success ? <Check size={32} /> : <AlertCircle size={32} />}
                   </div>
                   <h3 className={`text-xl font-serif mb-2 ${textPrimary}`}>{resultState.title}</h3>
                   <p className={`text-sm mb-6 ${textSecondary}`}>{resultState.message}</p>
-                  
                   <div className="flex gap-3 justify-center">
+                      <button onClick={onClose} className={`px-6 py-2 rounded-lg border transition-colors ${isDark ? 'border-white/20 text-white hover:bg-white/10' : 'border-black/20 text-black hover:bg-black/5'}`}>关闭</button>
                       <button 
-                         onClick={onClose}
-                         className={`px-6 py-2 rounded-lg border transition-colors ${isDark ? 'border-white/20 text-white hover:bg-white/10' : 'border-black/20 text-black hover:bg-black/5'}`}
-                      >
-                          关闭
-                      </button>
-                      
-                      {/* Continue Button logic */}
-                      {mode === 'single' ? (
-                          <button 
-                             onClick={() => {
-                                 // Reset for next
-                                 setResultState(prev => ({...prev, show: false}));
-                                 if (!editingPhoto) {
-                                     setImageUrl(''); setTitle(''); setUploadStatus('');
-                                     // Keep category/location as they might be repetitive
-                                 } else {
-                                     onClose();
-                                 }
-                             }}
-                             className={`px-6 py-2 rounded-lg font-medium ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}
-                          >
-                             {editingPhoto ? '完成' : '继续上传'}
-                          </button>
-                      ) : (
-                           <button 
-                             onClick={() => {
-                                 setResultState(prev => ({...prev, show: false}));
-                                 // Clear successes?
+                         onClick={() => {
+                             setResultState(prev => ({...prev, show: false}));
+                             if (mode === 'single' && !editingPhoto) {
+                                 setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle('');
+                             } else if (mode === 'batch') {
                                  setBatchList(prev => prev.filter(p => p.status !== 'success'));
-                             }}
-                             className={`px-6 py-2 rounded-lg font-medium ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}
-                          >
-                             继续上传
-                          </button>
-                      )}
+                             } else if (editingPhoto) {
+                                 onClose();
+                             }
+                         }}
+                         className={`px-6 py-2 rounded-lg font-medium ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}
+                      >
+                         {editingPhoto ? '完成' : '继续上传'}
+                      </button>
                   </div>
               </GlassCard>
           </div>
@@ -824,149 +778,172 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   return (
     <div className={`fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in ${isDark ? 'bg-black/80 backdrop-blur-sm' : 'bg-white/60 backdrop-blur-md'}`}>
-      <GlassCard className="w-full max-w-2xl h-[90vh] flex flex-col relative overflow-hidden" hoverEffect={false} theme={theme}>
+      <GlassCard className="w-full max-w-4xl h-[95vh] flex flex-col relative overflow-hidden" hoverEffect={false} theme={theme}>
         
-        {/* Header */}
         <div className="flex-shrink-0 p-6 pb-2 flex justify-between items-center border-b border-transparent">
             <div>
                 <h2 className={`text-2xl font-serif ${textPrimary}`}>{editingPhoto ? '编辑作品' : '上传作品'}</h2>
-                
-                {/* Tabs - Only show if not editing */}
                 {!editingPhoto && (
                     <div className="flex gap-4 mt-2">
-                        <button 
-                           onClick={() => setMode('single')}
-                           className={`text-xs uppercase tracking-widest pb-1 border-b-2 transition-colors ${mode === 'single' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}
-                        >
-                            单张上传
-                        </button>
-                        <button 
-                           onClick={() => setMode('batch')}
-                           className={`text-xs uppercase tracking-widest pb-1 border-b-2 transition-colors ${mode === 'batch' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}
-                        >
-                            批量上传
-                        </button>
+                        <button onClick={() => setMode('single')} className={`text-xs uppercase tracking-widest pb-1 border-b-2 transition-colors ${mode === 'single' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}>单张精修</button>
+                        <button onClick={() => setMode('batch')} className={`text-xs uppercase tracking-widest pb-1 border-b-2 transition-colors ${mode === 'batch' ? (isDark ? 'border-white text-white' : 'border-black text-black') : 'border-transparent opacity-50'}`}>批量上传</button>
                     </div>
                 )}
             </div>
-            <button onClick={onClose} className={`${textSecondary} hover:${textPrimary} transition-colors`}>
-              <X size={24} />
-            </button>
+            <button onClick={onClose} className={`${textSecondary} hover:${textPrimary} transition-colors`}><X size={24} /></button>
         </div>
 
-        {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6 pt-4 custom-scrollbar">
           
-          {/* ================= SINGLE MODE FORM ================= */}
           {mode === 'single' && (
-             <form onSubmit={handleSingleSubmit} className="space-y-6">
-                {/* Image Drop/Preview */}
-                <div className={`w-full aspect-video rounded-xl border-2 border-dashed flex flex-col items-center justify-center relative overflow-hidden group transition-colors flex-shrink-0
-                   ${isDark ? 'border-white/20 bg-white/5 hover:border-white/40' : 'border-black/20 bg-black/5 hover:border-black/40'}
-                `}>
-                  {imageUrl ? (
-                    <img src={imageUrl} alt="Preview" className="w-full h-full object-contain" />
-                  ) : (
-                    <div className={`flex flex-col items-center ${isDark ? 'text-white/50' : 'text-black/50'}`}>
-                      {loading ? <Loader2 className="animate-spin mb-2" /> : <Upload size={40} className="mb-2" />}
-                      <span className="text-sm">点击选择或拖拽图片</span>
-                    </div>
-                  )}
-                  {uploadStatus && !resultState.show && (
-                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded-full backdrop-blur-md flex items-center gap-1">
-                          <Loader2 size={10} className="animate-spin"/>
-                          {uploadStatus}
-                      </div>
-                  )}
-                  <input type="file" accept="image/jpeg,image/tiff,image/png" onChange={handleSingleFileChange} className="absolute inset-0 opacity-0 cursor-pointer" />
-                </div>
-
-                {/* Main Fields */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>作品标题</label>
-                    <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none transition-colors ${isDark ? 'bg-white/10 border-white/10 text-white focus:border-white/40' : 'bg-black/5 border-black/10 text-black focus:border-black/40'}`} />
-                  </div>
-                  <div>
-                    <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>作品分类</label>
-                    <select value={category} onChange={(e) => setCategory(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
-                      {categories.map(c => (<option key={c} value={c}>{c}</option>))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Rating */}
-                <div>
-                   <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>评级</label>
-                   <div className="flex gap-2">
-                     {[1,2,3,4,5].map(s => (
-                       <button type="button" key={s} onClick={() => setRating(s)} className="focus:outline-none hover:scale-110 transition-transform">
-                         <Star size={20} className={s <= rating ? (isDark ? 'text-white fill-white' : 'text-black fill-black') : (isDark ? 'text-white/20' : 'text-black/20')} />
-                       </button>
-                     ))}
-                   </div>
-                </div>
-
-                {/* EXIF Section */}
-                <div className={`border-t pt-4 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                  <div className="flex justify-between items-end mb-3">
-                     <h3 className={`text-sm font-medium ${isDark ? 'text-white/80' : 'text-black/80'}`}>EXIF 参数信息</h3>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                     <SmartInput label="相机型号" value={camera} onChange={setCamera} storageKey="camera" theme={theme} suggestions={presets.cameras} />
-                     <SmartInput label="镜头" value={lens} onChange={setLens} storageKey="lens" theme={theme} suggestions={presets.lenses} />
-                     <SmartInput label="焦段" value={focalLength} onChange={setFocalLength} storageKey="focal" theme={theme} />
-                     <SmartInput label="光圈" value={aperture} onChange={setAperture} storageKey="aperture" theme={theme} />
-                     <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
-                     <SmartInput label="ISO" value={iso} onChange={setIso} storageKey="iso" theme={theme} />
-                     <div className="col-span-2">
-                        <SmartInput 
-                            label="地点" 
-                            value={location} 
-                            onChange={(val) => { setLocation(val); setManualLocation(true); }} 
-                            storageKey="location" 
-                            theme={theme} 
-                            placeholder="自动获取或手动输入"
-                        />
-                     </div>
-                  </div>
-
-                  {/* Map Section */}
-                  <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
-                     <div className="flex justify-between items-center mb-2">
-                        <div className="flex items-center gap-2 text-xs opacity-60">
-                            <MapPin size={12} />
-                            <span>地理坐标 <span className="text-red-400">*必填</span> (点击或拖动选择，系统自动匹配地名)</span>
+             <form onSubmit={handleSaveInfo} className="space-y-6">
+                
+                {/* 1. SELECTION & PREVIEW AREA */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                    {/* LEFT: Raw / Original */}
+                    <div className="space-y-2">
+                        <div className={`w-full aspect-[4/3] rounded-xl border-2 border-dashed flex flex-col items-center justify-center relative overflow-hidden group transition-colors 
+                           ${isDark ? 'border-white/20 bg-white/5' : 'border-black/20 bg-black/5'}
+                           ${!originalPreview && !editingPhoto ? 'hover:border-white/40 cursor-pointer' : ''}
+                        `}>
+                            {originalPreview ? (
+                                <img src={originalPreview} alt="Original" className="w-full h-full object-contain" />
+                            ) : editingPhoto ? (
+                                <img src={editingPhoto.url} alt="Original" className="w-full h-full object-contain opacity-50 grayscale" /> // Indicate this is the old/remote one
+                            ) : (
+                                <div className={`flex flex-col items-center pointer-events-none ${isDark ? 'text-white/50' : 'text-black/50'}`}>
+                                    <FileImage size={32} className="mb-2" />
+                                    <span className="text-sm">1. 选择原始图片 (RAW/JPG)</span>
+                                </div>
+                            )}
+                            
+                            {!uploadedPhotoId && (
+                                <input type="file" accept="image/jpeg,image/tiff,image/png" onChange={handleSingleFileSelect} className="absolute inset-0 opacity-0 cursor-pointer" />
+                            )}
                         </div>
-                        {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
-                     </div>
-                     <div className="grid grid-cols-2 gap-4 mb-2">
-                        <SmartInput label="纬度" value={latitude} onChange={setLatitude} storageKey="gps_lat" placeholder="0.00" theme={theme} />
-                        <SmartInput label="经度" value={longitude} onChange={setLongitude} storageKey="gps_lng" placeholder="0.00" theme={theme} />
-                     </div>
-                     <div ref={mode === 'single' ? mapRef : null} className="w-full h-48 rounded-md overflow-hidden bg-gray-100 relative z-0" />
-                  </div>
+                        <p className={`text-xs text-center ${textSecondary}`}>原始预览 (本地)</p>
+                    </div>
 
-                  <div className="mt-4">
-                     <SmartInput label="拍摄日期" value={date} onChange={setDate} storageKey="date" theme={theme} type="date" />
-                  </div>
+                    {/* RIGHT: Compressed / Result */}
+                    <div className="space-y-2 relative">
+                         {/* Arrow Indicator on Desktop */}
+                         <div className={`hidden md:flex absolute -left-3 top-1/2 -translate-y-full -translate-x-1/2 z-10 ${isDark ? 'text-white' : 'text-black'}`}>
+                             <ArrowRight size={24} />
+                         </div>
+
+                        <div className={`w-full aspect-[4/3] rounded-xl border flex flex-col items-center justify-center relative overflow-hidden
+                           ${isDark ? 'bg-black/40 border-white/10' : 'bg-gray-100 border-black/10'}
+                        `}>
+                            {compressedPreview ? (
+                                <img src={compressedPreview} alt="Processed" className="w-full h-full object-contain" />
+                            ) : (
+                                <div className={`flex flex-col items-center ${isDark ? 'text-white/30' : 'text-black/30'}`}>
+                                    {loading ? <Loader2 size={32} className="animate-spin mb-2" /> : <Cloud size={32} className="mb-2" />}
+                                    <span className="text-sm">{loading ? uploadStatus : '2. 等待处理'}</span>
+                                </div>
+                            )}
+                            {uploadedPhotoId && (
+                                <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 shadow-lg">
+                                    <Check size={12} /> 已上传
+                                </div>
+                            )}
+                        </div>
+                         <p className={`text-xs text-center ${textSecondary}`}>处理后预览 (云端)</p>
+                    </div>
                 </div>
 
-                <button type="submit" disabled={!imageUrl || loading} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
-                  {loading ? '处理中...' : (editingPhoto ? '保存修改' : '发布到作品集')}
-                </button>
+                {/* ACTION: PROCESS BUTTON */}
+                {originalFile && !uploadedPhotoId && (
+                    <button 
+                        type="button"
+                        onClick={handleProcessAndUpload}
+                        disabled={loading}
+                        className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform
+                            ${isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}
+                        `}
+                    >
+                        {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                        {loading ? '正在解析...' : '开始解析 & 上传到云端'}
+                    </button>
+                )}
+                
+                {/* 2. METADATA FORM (Only show after upload or if editing) */}
+                {(uploadedPhotoId || editingPhoto) && (
+                    <div className="animate-fade-in space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>作品标题</label>
+                                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none transition-colors ${isDark ? 'bg-white/10 border-white/10 text-white focus:border-white/40' : 'bg-black/5 border-black/10 text-black focus:border-black/40'}`} />
+                            </div>
+                            <div>
+                                <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>作品分类</label>
+                                <select value={category} onChange={(e) => setCategory(e.target.value)} className={`w-full border rounded-lg p-2 focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white [&>option]:text-black' : 'bg-black/5 border-black/10 text-black'}`}>
+                                {categories.map(c => (<option key={c} value={c}>{c}</option>))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>评级</label>
+                            <div className="flex gap-2">
+                                {[1,2,3,4,5].map(s => (
+                                <button type="button" key={s} onClick={() => setRating(s)} className="focus:outline-none hover:scale-110 transition-transform">
+                                    <Star size={20} className={s <= rating ? (isDark ? 'text-white fill-white' : 'text-black fill-black') : (isDark ? 'text-white/20' : 'text-black/20')} />
+                                </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className={`border-t pt-4 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                            <div className="flex justify-between items-end mb-3">
+                                <h3 className={`text-sm font-medium ${isDark ? 'text-white/80' : 'text-black/80'}`}>EXIF 参数信息</h3>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <SmartInput label="相机型号" value={camera} onChange={setCamera} storageKey="camera" theme={theme} suggestions={presets.cameras} />
+                                <SmartInput label="镜头" value={lens} onChange={setLens} storageKey="lens" theme={theme} suggestions={presets.lenses} />
+                                <SmartInput label="焦段" value={focalLength} onChange={setFocalLength} storageKey="focal" theme={theme} />
+                                <SmartInput label="光圈" value={aperture} onChange={setAperture} storageKey="aperture" theme={theme} />
+                                <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
+                                <SmartInput label="ISO" value={iso} onChange={setIso} storageKey="iso" theme={theme} />
+                                <div className="col-span-2">
+                                    <SmartInput label="地点" value={location} onChange={(val) => { setLocation(val); setManualLocation(true); }} storageKey="location" theme={theme} placeholder="自动获取或手动输入" />
+                                </div>
+                            </div>
+
+                            <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <div className="flex items-center gap-2 text-xs opacity-60">
+                                        <MapPin size={12} />
+                                        <span>地理坐标 <span className="text-red-400">*必填</span></span>
+                                    </div>
+                                    {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
+                                </div>
+                                <div className="grid grid-cols-2 gap-4 mb-2">
+                                    <SmartInput label="纬度" value={latitude} onChange={setLatitude} storageKey="gps_lat" placeholder="0.00" theme={theme} />
+                                    <SmartInput label="经度" value={longitude} onChange={setLongitude} storageKey="gps_lng" placeholder="0.00" theme={theme} />
+                                </div>
+                                <div ref={mode === 'single' ? mapRef : null} className="w-full h-48 rounded-md overflow-hidden bg-gray-100 relative z-0" />
+                            </div>
+
+                            <div className="mt-4">
+                                <SmartInput label="拍摄日期" value={date} onChange={setDate} storageKey="date" theme={theme} type="date" />
+                            </div>
+                        </div>
+
+                        <button type="submit" disabled={loading} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
+                            {loading ? '保存中...' : '保存作品信息'}
+                        </button>
+                    </div>
+                )}
              </form>
           )}
 
-          {/* ================= BATCH MODE FORM ================= */}
           {mode === 'batch' && (
              <div className="space-y-6">
-                {/* Common Settings Area */}
                 <div className={`p-4 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
                     <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${textPrimary}`}>
                         <Layers size={14} /> 统一设置 (应用到所有图片)
                     </h3>
-                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label className={`block text-xs uppercase tracking-wider mb-1 ${textSecondary}`}>统一分类</label>
@@ -978,16 +955,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             <SmartInput label="拍摄日期" value={batchDate} onChange={setBatchDate} storageKey="date" theme={theme} type="date" />
                         </div>
                     </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                          <div>
-                            <SmartInput 
-                                label="统一地点名称" 
-                                value={batchLocationName} 
-                                onChange={(val) => { setBatchLocationName(val); setBatchManualLoc(true); }} 
-                                storageKey="location" 
-                                theme={theme} 
-                            />
+                            <SmartInput label="统一地点名称" value={batchLocationName} onChange={(val) => { setBatchLocationName(val); setBatchManualLoc(true); }} storageKey="location" theme={theme} />
                             <div className="grid grid-cols-2 gap-2 mt-2">
                                 <SmartInput label="纬度" value={batchLat} onChange={setBatchLat} storageKey="gps_lat" placeholder="0.00" theme={theme} />
                                 <SmartInput label="经度" value={batchLng} onChange={setBatchLng} storageKey="gps_lng" placeholder="0.00" theme={theme} />
@@ -997,7 +967,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     </div>
                 </div>
 
-                {/* File Drop Area */}
                 <div className={`w-full h-32 rounded-xl border-2 border-dashed flex flex-col items-center justify-center relative transition-colors ${isDark ? 'border-white/20 hover:border-white/40' : 'border-black/20 hover:border-black/40'}`}>
                     <div className={`flex flex-col items-center pointer-events-none ${isDark ? 'text-white/50' : 'text-black/50'}`}>
                         <Upload size={30} className="mb-2" />
@@ -1006,12 +975,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     <input type="file" multiple accept="image/jpeg,image/tiff,image/png" onChange={handleBatchFiles} className="absolute inset-0 opacity-0 cursor-pointer" />
                 </div>
 
-                {/* File List */}
                 <div className="space-y-2">
                     <h3 className={`text-xs uppercase tracking-wider ${textSecondary}`}>已添加队列 ({batchList.length})</h3>
-                    
                     {batchList.length === 0 && <p className={`text-xs italic ${textSecondary}`}>暂无图片</p>}
-                    
                     {batchList.map((item) => (
                         <div key={item.id} className={`flex items-center gap-3 p-2 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
                             <div className="w-10 h-10 rounded overflow-hidden flex-shrink-0 bg-gray-500">
@@ -1026,11 +992,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                     {item.status === 'error' && <span className="text-red-400">失败: {item.errorMsg}</span>}
                                 </p>
                             </div>
-                            
                             {item.status === 'pending' && (
-                                <button onClick={() => removeBatchItem(item.id)} className="p-2 opacity-50 hover:opacity-100 text-red-400">
-                                    <Trash2 size={16} />
-                                </button>
+                                <button onClick={() => removeBatchItem(item.id)} className="p-2 opacity-50 hover:opacity-100 text-red-400"><Trash2 size={16} /></button>
                             )}
                             {item.status === 'success' && <CheckCircle size={16} className="text-green-500 mr-2" />}
                             {item.status === 'uploading' && <Loader2 size={16} className="animate-spin text-blue-500 mr-2" />}
@@ -1039,22 +1002,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     ))}
                 </div>
 
-                {/* Footer Action */}
-                <button 
-                   onClick={handleBatchSubmit} 
-                   disabled={loading || batchList.length === 0 || batchList.every(i => i.status === 'success')}
-                   className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}
-                >
+                <button onClick={handleBatchSubmit} disabled={loading || batchList.length === 0 || batchList.every(i => i.status === 'success')} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
                   {loading ? '正在批量上传...' : `开始上传 (${batchList.filter(i => i.status === 'pending').length} 张)`}
                 </button>
              </div>
           )}
-
         </div>
-
-        {/* Result Overlay Popup */}
         <ResultOverlay />
-
       </GlassCard>
     </div>
   );
