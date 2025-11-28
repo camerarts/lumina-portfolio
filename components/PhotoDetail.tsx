@@ -42,6 +42,8 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
       }
   }
 
+  const gpsTooltip = exif.latitude && exif.longitude ? `${exif.latitude}, ${exif.longitude}` : undefined;
+
   return (
     <div className={`w-full flex flex-wrap items-end justify-center gap-y-2 gap-x-4 md:gap-x-8 text-xs md:text-sm font-sans ${className}`}>
       
@@ -88,9 +90,9 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
       </div>
 
       {/* 3. Location Column */}
-      <div className="flex flex-col items-center gap-0.5">
+      <div className="flex flex-col items-center gap-0.5" title={gpsTooltip}>
          <span className={`text-[10px] uppercase tracking-widest ${labelColor} scale-90 origin-bottom`}>地点</span>
-         <span className={`${valueColor} font-medium`}>{displayLocation}</span>
+         <span className={`${valueColor} font-medium cursor-help`}>{displayLocation}</span>
       </div>
 
       {/* 4. Camera Column */}
