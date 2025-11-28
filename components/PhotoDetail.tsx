@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Layers, Aperture, Zap, Gauge, Star, MoreHorizontal } from 'lucide-react';
 import { ExifData, Theme } from '../types';
@@ -13,7 +12,7 @@ interface PhotoDetailProps {
 }
 
 export const PhotoDetail: React.FC<PhotoDetailProps> = ({ 
-  exif, 
+  exif = {} as ExifData, 
   rating = 0, 
   className = '', 
   theme = 'dark',
@@ -22,6 +21,9 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
 }) => {
   const isDark = theme === 'dark';
   
+  // Safety check for undefined exif despite default value
+  const safeExif = exif || ({} as ExifData);
+
   // Colors tailored to match the solid grey background reference
   const labelColor = isDark ? 'text-white/40' : 'text-[#888888]';
   const valueColor = isDark ? 'text-white/90' : 'text-[#333333]';
@@ -29,12 +31,12 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
 
   // Determine Location Display
   let displayLocation = 'Unknown';
-  if (exif.location && exif.location.trim() !== '' && exif.location !== 'Unknown') {
-      displayLocation = exif.location;
-  } else if (exif.latitude && exif.longitude) {
+  if (safeExif.location && safeExif.location.trim() !== '' && safeExif.location !== 'Unknown') {
+      displayLocation = safeExif.location;
+  } else if (safeExif.latitude && safeExif.longitude) {
       // Fallback to coordinates
-      const lat = typeof exif.latitude === 'string' ? parseFloat(exif.latitude) : exif.latitude;
-      const lng = typeof exif.longitude === 'string' ? parseFloat(exif.longitude) : exif.longitude;
+      const lat = typeof safeExif.latitude === 'string' ? parseFloat(safeExif.latitude) : safeExif.latitude;
+      const lng = typeof safeExif.longitude === 'string' ? parseFloat(safeExif.longitude) : safeExif.longitude;
       if (!isNaN(lat) && !isNaN(lng)) {
           const latDir = lat >= 0 ? 'N' : 'S';
           const lngDir = lng >= 0 ? 'E' : 'W';
@@ -42,7 +44,7 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
       }
   }
 
-  const gpsTooltip = exif.latitude && exif.longitude ? `${exif.latitude}, ${exif.longitude}` : undefined;
+  const gpsTooltip = safeExif.latitude && safeExif.longitude ? `${safeExif.latitude}, ${safeExif.longitude}` : undefined;
 
   return (
     <div className={`w-full flex flex-wrap items-end justify-center gap-y-2 gap-x-4 md:gap-x-8 text-xs md:text-sm font-sans ${className}`}>
@@ -72,19 +74,19 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
          <div className={`flex items-center gap-2 md:gap-3 ${valueColor} font-medium`}>
             <div className="flex items-center gap-0.5" title="Focal Length">
                 <Layers size={12} className={iconColor} strokeWidth={1.5} />
-                <span>{exif.focalLength || '--'}</span>
+                <span>{safeExif.focalLength || '--'}</span>
             </div>
             <div className="flex items-center gap-0.5" title="Aperture">
                 <Aperture size={12} className={iconColor} strokeWidth={1.5} />
-                <span>{exif.aperture || '--'}</span>
+                <span>{safeExif.aperture || '--'}</span>
             </div>
             <div className="flex items-center gap-0.5" title="Shutter Speed">
                 <Zap size={12} className={iconColor} strokeWidth={1.5} />
-                <span>{exif.shutterSpeed || '--'}</span>
+                <span>{safeExif.shutterSpeed || '--'}</span>
             </div>
              <div className="flex items-center gap-0.5" title="ISO">
                 <Gauge size={12} className={iconColor} strokeWidth={1.5} />
-                <span>ISO {exif.iso || '--'}</span>
+                <span>ISO {safeExif.iso || '--'}</span>
             </div>
          </div>
       </div>
@@ -98,13 +100,13 @@ export const PhotoDetail: React.FC<PhotoDetailProps> = ({
       {/* 4. Camera Column */}
       <div className="flex flex-col items-center gap-0.5">
         <span className={`text-[10px] uppercase tracking-widest ${labelColor} scale-90 origin-bottom`}>相机</span>
-        <span className={`${valueColor} font-medium`}>{exif.camera || '--'}</span>
+        <span className={`${valueColor} font-medium`}>{safeExif.camera || '--'}</span>
       </div>
 
        {/* 5. Lens Column */}
        <div className="flex flex-col items-center gap-0.5">
         <span className={`text-[10px] uppercase tracking-widest ${labelColor} scale-90 origin-bottom`}>镜头</span>
-        <span className={`${valueColor} font-medium`}>{exif.lens || '--'}</span>
+        <span className={`${valueColor} font-medium`}>{safeExif.lens || '--'}</span>
       </div>
 
       {/* Extra Menu Icon */}
