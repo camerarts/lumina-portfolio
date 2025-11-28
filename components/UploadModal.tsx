@@ -49,7 +49,6 @@ const compressImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 15000); 
 
-    const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
     
@@ -75,6 +74,7 @@ const compressImage = (file: File): Promise<string> => {
       let quality = 0.9;
       let dataUrl = canvas.toDataURL('image/jpeg', quality);
       
+      const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
       const maxStringLength = maxSizeInBytes * 1.37;
       while (dataUrl.length > maxStringLength && quality > 0.3) {
          quality -= 0.1;
@@ -101,10 +101,6 @@ const rationalToNumber = (obj: any): number => {
   if (obj instanceof Number) return obj.valueOf();
   // exif-js often returns array of Numbers for Rationals
   if (Array.isArray(obj)) {
-      // If it's a simple array like [24, 1] it might be interpreted differently contextually,
-      // but usually Rationals are represented as objects {numerator, denominator} in newer versions
-      // OR as Number objects.
-      // However, exif-js sometimes just gives the value.
       if (obj.length > 0) return rationalToNumber(obj[0]);
       return NaN;
   }
@@ -199,30 +195,7 @@ const extractExif = async (file: File): Promise<any> => {
                   }
               }
 
-              // GPS
-              const latArr = tags.GPSLatitude;
-              const latRef = tags.GPSLatitudeRef;
-              const lngArr = tags.GPSLongitude;
-              const lngRef = tags.GPSLongitudeRef;
-
-              if (latArr && lngArr && latRef && lngRef) {
-                  const convertDMSToDD = (arr: any[], ref: string) => {
-                      const d = rationalToNumber(arr[0]);
-                      const m = rationalToNumber(arr[1]);
-                      const s = rationalToNumber(arr[2]);
-                      let dd = d + m / 60 + s / 3600;
-                      if (ref === 'S' || ref === 'W') dd = dd * -1;
-                      return dd;
-                  };
-
-                  const lat = convertDMSToDD(latArr, latRef);
-                  const lng = convertDMSToDD(lngArr, lngRef);
-
-                  if (!isNaN(lat) && !isNaN(lng)) {
-                      data.latitude = lat;
-                      data.longitude = lng;
-                  }
-              }
+              // GPS extraction removed per user request to force manual map selection
               
               resolve(data);
           });
