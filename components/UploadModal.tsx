@@ -94,6 +94,17 @@ const compressImage = (file: File): Promise<string> => {
   });
 };
 
+// Helper: Convert EXIF Rational object (numerator/denominator) to number
+const rationalToNumber = (data: any): number => {
+    if (typeof data === 'number') return data;
+    if (data && typeof data === 'object' && 'numerator' in data && 'denominator' in data) {
+        if (data.denominator === 0) return 0;
+        return data.numerator / data.denominator;
+    }
+    if (data instanceof Number) return data.valueOf();
+    return Number(data) || 0;
+};
+
 // Helper to parse raw tags into our format
 const parseExifTags = (tags: any) => {
     const data: any = {};
@@ -115,27 +126,35 @@ const parseExifTags = (tags: any) => {
     if (lensModel) data.lens = lensModel;
 
     // 3. Technical Specs
-    if (tags['ISOSpeedRatings']) data.iso = String(tags['ISOSpeedRatings']);
+    if (tags['ISOSpeedRatings']) {
+        // ISO might be just a number or a rational
+        data.iso = String(tags['ISOSpeedRatings']); 
+    }
     
     if (tags['FNumber']) {
-        const f = Number(tags['FNumber']);
-        data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
+        const f = rationalToNumber(tags['FNumber']);
+        if (f > 0) data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
     }
     
     if (tags['ExposureTime']) {
-        const t = Number(tags['ExposureTime']);
-        // Format: 1/125s instead of 0.008s
-        data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+        const t = rationalToNumber(tags['ExposureTime']);
+        if (t > 0) {
+             // Format: 1/125s instead of 0.008s
+             data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+        }
     }
 
     if (tags['FocalLength']) {
-        const fl = Number(tags['FocalLength']);
-        data.focalLength = `${Math.round(fl)}mm`;
+        const fl = rationalToNumber(tags['FocalLength']);
+        if (fl > 0) data.focalLength = `${Math.round(fl)}mm`;
     }
 
     if (tags['DateTimeOriginal']) {
         // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD"
-        data.date = String(tags['DateTimeOriginal']).split(' ')[0].replace(/:/g, '-');
+        const dt = String(tags['DateTimeOriginal']);
+        if (dt.length >= 10) {
+            data.date = dt.substring(0, 10).replace(/:/g, '-');
+        }
     }
 
     // 4. GPS
@@ -144,22 +163,24 @@ const parseExifTags = (tags: any) => {
     const lon = tags['GPSLongitude'];
     const lonRef = tags['GPSLongitudeRef'];
 
-    if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
-        const convertToNum = (val: any) => Number(val);
+    if (lat && lon && lat.length === 3 && lon.length === 3) {
+        // GPSLatitude is an array of 3 Rationals [deg, min, sec]
+        const dLat = rationalToNumber(lat[0]);
+        const mLat = rationalToNumber(lat[1]);
+        const sLat = rationalToNumber(lat[2]);
         
-        const dLat = convertToNum(lat[0]);
-        const mLat = convertToNum(lat[1]);
-        const sLat = convertToNum(lat[2]);
         let ddLat = dLat + mLat / 60 + sLat / 3600;
         if (latRef === 'S') ddLat = -ddLat;
 
-        const dLon = convertToNum(lon[0]);
-        const mLon = convertToNum(lon[1]);
-        const sLon = convertToNum(lon[2]);
+        const dLon = rationalToNumber(lon[0]);
+        const mLon = rationalToNumber(lon[1]);
+        const sLon = rationalToNumber(lon[2]);
+        
         let ddLon = dLon + mLon / 60 + sLon / 3600;
         if (lonRef === 'W') ddLon = -ddLon;
 
-        if (!isNaN(ddLat) && !isNaN(ddLon)) {
+        // Ensure valid coordinates
+        if (!isNaN(ddLat) && !isNaN(ddLon) && (ddLat !== 0 || ddLon !== 0)) {
             data.latitude = ddLat;
             data.longitude = ddLon;
         }
@@ -180,34 +201,37 @@ const extractExif = async (file: File): Promise<any> => {
       return {};
   }
 
-  // 2. Primary Method: ArrayBuffer
-  try {
-      // Read file as ArrayBuffer
-      const buffer = await file.arrayBuffer();
-      // Use EXIF.readFromBinaryFile directly
-      const tags = EXIF.readFromBinaryFile(buffer);
-      
-      if (tags && Object.keys(tags).length > 0) {
-          console.log("EXIF found via ArrayBuffer");
-          return parseExifTags(tags);
-      }
-  } catch (err) {
-      console.warn("ArrayBuffer EXIF extraction failed, trying fallback...", err);
-  }
-
-  // 3. Fallback Method: Standard EXIF.getData
-  // This helps if the binary read failed or returned empty for some structure reasons
+  // 2. Reliable Method: Create Image -> EXIF.getData
+  // This avoids issues with ArrayBuffer slicing or direct file parsing on some browsers/file sizes
   return new Promise((resolve) => {
-      EXIF.getData(file as any, function(this: any) {
-          const tags = this.exifdata;
-          if (tags && Object.keys(tags).length > 0) {
-              console.log("EXIF found via Fallback");
-              resolve(parseExifTags(tags));
-          } else {
-              console.log("No EXIF found");
-              resolve({});
-          }
-      });
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      
+      img.onload = function() {
+          // Explicitly cast 'this' to any to avoid TS errors with exif-js
+          EXIF.getData(img as any, function(this: any) {
+              // Retrieve all tags safely
+              const allTags = EXIF.getAllTags(this);
+              
+              URL.revokeObjectURL(objectUrl); // Clean up memory
+              
+              if (allTags && Object.keys(allTags).length > 0) {
+                  console.log("EXIF extracted successfully via Image object");
+                  resolve(parseExifTags(allTags));
+              } else {
+                  console.warn("No EXIF tags found in image");
+                  resolve({});
+              }
+          });
+      };
+
+      img.onerror = function() {
+          URL.revokeObjectURL(objectUrl);
+          console.error("Failed to load image for EXIF extraction");
+          resolve({});
+      };
+
+      img.src = objectUrl;
   });
 };
 
