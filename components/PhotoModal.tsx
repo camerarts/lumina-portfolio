@@ -149,16 +149,18 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
       {/* Top Right Controls */}
       <div className="absolute top-6 right-6 z-[120] flex items-center gap-2">
         <button 
-          className={`p-3 transition-all hover:scale-110 opacity-60 hover:opacity-100
-            ${isDark ? 'text-white' : 'text-black'}
+          className={`p-3 rounded-full transition-all hover:scale-110 
+            ${isDark ? 'bg-black/20 text-white hover:bg-black/40' : 'bg-white/20 text-black hover:bg-white/40'}
+            backdrop-blur-md shadow-lg
           `}
         >
           <MoreHorizontal size={24} />
         </button>
         <button 
           onClick={onClose}
-          className={`p-3 transition-all hover:rotate-90 opacity-60 hover:opacity-100
-            ${isDark ? 'text-white' : 'text-black'}
+          className={`p-3 rounded-full transition-all hover:rotate-90 
+            ${isDark ? 'bg-black/20 text-white hover:bg-black/40' : 'bg-white/20 text-black hover:bg-white/40'}
+            backdrop-blur-md shadow-lg
           `}
         >
           <X size={28} strokeWidth={1} />
