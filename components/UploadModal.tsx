@@ -409,7 +409,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const todayStr = `${yyyy}-${mm}-${dd}`;
       const defaultCat = categories[0] || '默认';
 
-      client.getPresets().then(p => { if(p) setPresets(p); });
+      client.getPresets().then(p => { 
+          if(p) {
+              setPresets(p); 
+              if (!editingPhoto && p.lenses.length > 0) {
+                  setLens(p.lenses[0]);
+              }
+          }
+      });
 
       if (editingPhoto) {
         setMode('single');
@@ -580,7 +587,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setUploadedPhotoId('');
       setImageUrl('');
       setIsParsed(false); 
-      setTitle(''); setCamera(''); setLens(''); setAperture(''); setShutter(''); 
+      setTitle(''); setCamera(''); setLens(presets.lenses[0] || ''); setAperture(''); setShutter(''); 
       setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
       setManualLocation(false);
     }
@@ -784,7 +791,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                              setResultState(prev => ({...prev, show: false}));
                              if (mode === 'single' && !editingPhoto) {
                                  setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle(''); setIsParsed(false);
-                                 setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
+                                 setCamera(''); setLens(presets.lenses[0] || ''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
                              } else if (mode === 'batch') {
                                  setBatchList(prev => prev.filter(p => p.status !== 'success'));
                              } else if (editingPhoto) {
