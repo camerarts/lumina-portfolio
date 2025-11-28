@@ -49,11 +49,14 @@ interface UploadModalProps {
 
 const compressImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
+    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 10000); // 10s timeout
+
     const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
     img.src = objectUrl;
     img.onload = () => {
+      clearTimeout(timeOutId);
       URL.revokeObjectURL(objectUrl);
       let width = img.naturalWidth;
       let height = img.naturalHeight;
@@ -65,9 +68,6 @@ const compressImage = (file: File): Promise<string> => {
         if (width > height) { width = MAX_DIMENSION; height = width / ratio; } 
         else { height = MAX_DIMENSION; width = height * ratio; }
       }
-      
-      // If already small enough and no resize needed, allow it (but we usually want to standardize format to JPEG)
-      // However, to ensure consistency and R2 performance, let's always compress large raw inputs.
       
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -86,64 +86,84 @@ const compressImage = (file: File): Promise<string> => {
       }
       resolve(dataUrl);
     };
-    img.onerror = (e) => { URL.revokeObjectURL(objectUrl); reject(e); }
+    img.onerror = (e) => { 
+        clearTimeout(timeOutId);
+        URL.revokeObjectURL(objectUrl); 
+        reject(e); 
+    }
   });
 };
 
 const extractExif = (file: File): Promise<any> => {
   return new Promise((resolve) => {
-    EXIF.getData(file as any, function(this: any) {
-        if (!this || !this.exifdata) { resolve({}); return; }
-        const getTag = (tag: string) => EXIF.getTag(this, tag);
-        
-        const data: any = {};
-
-        const make = getTag('Make');
-        const model = getTag('Model');
-        if (model) {
-            const cleanMake = make ? make.replace(/\0/g, '').trim() : '';
-            const cleanModel = model.replace(/\0/g, '').trim();
-            data.camera = cleanModel.startsWith(cleanMake) ? cleanModel : `${cleanMake} ${cleanModel}`.trim();
-        }
-        
-        const isoVal = getTag('ISOSpeedRatings'); if (isoVal) data.iso = String(isoVal);
-        const fNumber = getTag('FNumber'); if (fNumber) data.aperture = `f/${Number(fNumber).toFixed(1)}`.replace('.0', '');
-        const exposure = getTag('ExposureTime'); if (exposure) data.shutter = typeof exposure === 'number' ? (exposure < 1 ? `1/${Math.round(1/exposure)}s` : `${exposure}s`) : `${exposure.numerator}/${exposure.denominator}s`;
-        const focal = getTag('FocalLength'); if (focal) data.focalLength = `${Math.round(typeof focal === 'number' ? focal : focal.numerator / focal.denominator)}mm`;
-        const dateTag = getTag('DateTimeOriginal'); if (dateTag) data.date = dateTag.split(' ')[0].replace(/:/g, '-');
-        
-        const lat = getTag("GPSLatitude"); const latRef = getTag("GPSLatitudeRef");
-        const lon = getTag("GPSLongitude"); const lonRef = getTag("GPSLongitudeRef");
-
-        // Helper to handle Rational objects from EXIF (numerator/denominator) or simple numbers
-        const convertToNum = (val: any) => {
-            if (typeof val === 'number') return val;
-            if (val && typeof val.numerator === 'number' && typeof val.denominator === 'number') {
-                return val.denominator === 0 ? 0 : val.numerator / val.denominator;
-            }
-            return Number(val);
-        };
-
-        if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
-            const dLat = convertToNum(lat[0]);
-            const mLat = convertToNum(lat[1]);
-            const sLat = convertToNum(lat[2]);
-            let ddLat = dLat + mLat / 60 + sLat / 3600;
-            if (latRef === 'S') ddLat = -ddLat;
-
-            const dLon = convertToNum(lon[0]);
-            const mLon = convertToNum(lon[1]);
-            const sLon = convertToNum(lon[2]);
-            let ddLon = dLon + mLon / 60 + sLon / 3600;
-            if (lonRef === 'W') ddLon = -ddLon;
-
-            if (!isNaN(ddLat) && !isNaN(ddLon)) {
-                data.latitude = ddLat;
-                data.longitude = ddLon;
-            }
-        }
+    // Add a timeout wrapper to prevent hanging forever on weird files
+    let isFinished = false;
+    const finish = (data: any) => {
+        if(isFinished) return;
+        isFinished = true;
         resolve(data);
-    });
+    };
+
+    setTimeout(() => {
+        finish({}); // Resolve with empty if takes too long (e.g. 5s)
+    }, 5000);
+
+    try {
+        EXIF.getData(file as any, function(this: any) {
+            if (!this || !this.exifdata) { finish({}); return; }
+            const getTag = (tag: string) => EXIF.getTag(this, tag);
+            
+            const data: any = {};
+
+            const make = getTag('Make');
+            const model = getTag('Model');
+            if (model) {
+                const cleanMake = make ? make.replace(/\0/g, '').trim() : '';
+                const cleanModel = model.replace(/\0/g, '').trim();
+                data.camera = cleanModel.startsWith(cleanMake) ? cleanModel : `${cleanMake} ${cleanModel}`.trim();
+            }
+            
+            const isoVal = getTag('ISOSpeedRatings'); if (isoVal) data.iso = String(isoVal);
+            const fNumber = getTag('FNumber'); if (fNumber) data.aperture = `f/${Number(fNumber).toFixed(1)}`.replace('.0', '');
+            const exposure = getTag('ExposureTime'); if (exposure) data.shutter = typeof exposure === 'number' ? (exposure < 1 ? `1/${Math.round(1/exposure)}s` : `${exposure}s`) : `${exposure.numerator}/${exposure.denominator}s`;
+            const focal = getTag('FocalLength'); if (focal) data.focalLength = `${Math.round(typeof focal === 'number' ? focal : focal.numerator / focal.denominator)}mm`;
+            const dateTag = getTag('DateTimeOriginal'); if (dateTag) data.date = dateTag.split(' ')[0].replace(/:/g, '-');
+            
+            const lat = getTag("GPSLatitude"); const latRef = getTag("GPSLatitudeRef");
+            const lon = getTag("GPSLongitude"); const lonRef = getTag("GPSLongitudeRef");
+
+            const convertToNum = (val: any) => {
+                if (typeof val === 'number') return val;
+                if (val && typeof val.numerator === 'number' && typeof val.denominator === 'number') {
+                    return val.denominator === 0 ? 0 : val.numerator / val.denominator;
+                }
+                return Number(val);
+            };
+
+            if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
+                const dLat = convertToNum(lat[0]);
+                const mLat = convertToNum(lat[1]);
+                const sLat = convertToNum(lat[2]);
+                let ddLat = dLat + mLat / 60 + sLat / 3600;
+                if (latRef === 'S') ddLat = -ddLat;
+
+                const dLon = convertToNum(lon[0]);
+                const mLon = convertToNum(lon[1]);
+                const sLon = convertToNum(lon[2]);
+                let ddLon = dLon + mLon / 60 + sLon / 3600;
+                if (lonRef === 'W') ddLon = -ddLon;
+
+                if (!isNaN(ddLat) && !isNaN(ddLon)) {
+                    data.latitude = ddLat;
+                    data.longitude = ddLon;
+                }
+            }
+            finish(data);
+        });
+    } catch (e) {
+        console.warn("EXIF extraction failed", e);
+        finish({});
+    }
   });
 };
 
@@ -361,14 +381,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const defaultCat = categories[0] || '默认';
 
       client.getPresets().then(p => {
-        if(p) {
-            setPresets(p);
-            // Apply defaults if new upload
-            if (!editingPhoto && mode === 'single') {
-                setCamera(prev => prev || (p.cameras && p.cameras[0]) || '');
-                setLens(prev => prev || (p.lenses && p.lenses[0]) || '');
-            }
-        }
+        if(p) setPresets(p);
       });
 
       if (editingPhoto) {
@@ -544,10 +557,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setOriginalFile(file);
       // Create Object URL for instant preview (zero lag)
       setOriginalPreview(URL.createObjectURL(file));
-      // Reset subsequent states
+      // Reset subsequent states to ensure no ghost data from previous file
       setCompressedPreview('');
       setUploadedPhotoId('');
       setImageUrl('');
+      // Clear metadata fields to force new parse/input
+      setTitle(''); 
+      setCamera(''); 
+      setLens(''); 
+      setAperture(''); 
+      setShutter(''); 
+      setIso(''); 
+      setLocation(''); 
+      setFocalLength(''); 
+      // Do not clear Date/GPS if we want to keep User Location, but usually cleaner to reset:
+      // We will let EXIF or Geolocation logic refill them.
     }
   };
 
@@ -583,9 +607,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 setLocation(addr);
                 setManualLocation(false);
             }
-        } else {
-             // If no EXIF GPS, keep current (user loc) or reset?
-             // Keep current as user might have geolocation active
         }
 
         // Get Dimensions
@@ -612,7 +633,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     } catch (err) {
         console.error(err);
-        alert("处理或上传失败，请重试");
+        alert("处理或上传失败，请重试: " + (err as Error).message);
     } finally {
         setLoading(false);
         setUploadStatus('');
@@ -758,6 +779,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                              setResultState(prev => ({...prev, show: false}));
                              if (mode === 'single' && !editingPhoto) {
                                  setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle('');
+                                 setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
                              } else if (mode === 'batch') {
                                  setBatchList(prev => prev.filter(p => p.status !== 'success'));
                              } else if (editingPhoto) {
