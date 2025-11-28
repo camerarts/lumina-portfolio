@@ -17,7 +17,7 @@ interface SmartInputProps {
   theme: Theme;
   type?: string;
   readOnly?: boolean;
-  suggestions?: string[]; // Dropdown options from backend presets
+  suggestions?: string[];
 }
 
 interface BatchItem {
@@ -38,7 +38,7 @@ interface UploadModalProps {
   theme: Theme;
   editingPhoto?: Photo | null;
   token: string;
-  categories?: string[]; // Prop for dynamic categories
+  categories?: string[];
 }
 
 // ==========================================
@@ -47,21 +47,20 @@ interface UploadModalProps {
 
 const compressImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 15000); // 15s timeout for large files
+    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 15000); 
 
     const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
-    img.src = objectUrl;
+    
     img.onload = () => {
       clearTimeout(timeOutId);
       URL.revokeObjectURL(objectUrl);
       let width = img.naturalWidth;
       let height = img.naturalHeight;
       const MAX_DIMENSION = 2560;
-      let needsResize = false;
+      
       if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-        needsResize = true;
         const ratio = width / height;
         if (width > height) { width = MAX_DIMENSION; height = width / ratio; } 
         else { height = MAX_DIMENSION; width = height * ratio; }
@@ -76,8 +75,7 @@ const compressImage = (file: File): Promise<string> => {
       let quality = 0.9;
       let dataUrl = canvas.toDataURL('image/jpeg', quality);
       
-      // Binary Search-ish reduction
-      const maxStringLength = maxSizeInBytes * 1.37; // Approx base64 length for 2MB
+      const maxStringLength = maxSizeInBytes * 1.37;
       while (dataUrl.length > maxStringLength && quality > 0.3) {
          quality -= 0.1;
          dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -88,19 +86,25 @@ const compressImage = (file: File): Promise<string> => {
         clearTimeout(timeOutId);
         URL.revokeObjectURL(objectUrl); 
         reject(e); 
-    }
+    };
+    // Set src after defining onload/onerror to avoid race conditions
+    img.src = objectUrl;
   });
 };
 
 /**
- * Helper to convert EXIF Rational objects (fractions) to numbers.
- * Exif-js returns things like {numerator: 1, denominator: 100} or Number objects.
+ * Helper to convert EXIF Rational objects to numbers.
  */
 const rationalToNumber = (obj: any): number => {
   if (obj === undefined || obj === null) return NaN;
   if (typeof obj === 'number') return obj;
   if (obj instanceof Number) return obj.valueOf();
+  // exif-js often returns array of Numbers for Rationals
   if (Array.isArray(obj)) {
+      // If it's a simple array like [24, 1] it might be interpreted differently contextually,
+      // but usually Rationals are represented as objects {numerator, denominator} in newer versions
+      // OR as Number objects.
+      // However, exif-js sometimes just gives the value.
       if (obj.length > 0) return rationalToNumber(obj[0]);
       return NaN;
   }
@@ -118,20 +122,19 @@ const extractExif = async (file: File): Promise<any> => {
       alert("提示：PNG/WebP 格式通常不包含 EXIF 信息，建议使用 JPG/JPEG 原图。");
       return {};
   }
-  
-  if (type.includes('heic')) {
-      alert("提示：HEIC 格式浏览器支持有限，建议先导出为 JPG 上传。");
-  }
-
-  // 2. Load Image for EXIF parsing
-  // Creating a temporary Image object and letting browser decode it is robust for large files.
-  const img = new Image();
-  const objectUrl = URL.createObjectURL(file);
-  img.src = objectUrl;
 
   return new Promise((resolve) => {
+      // Safety timeout
+      const timer = setTimeout(() => {
+          console.warn("EXIF extraction timed out");
+          resolve({});
+      }, 5000);
+
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      
       img.onload = () => {
-          // EXIF.getData(img, callback)
+          clearTimeout(timer);
           const EXIF = (window as any).EXIF;
           if (!EXIF) {
               console.error("EXIF library not loaded");
@@ -158,7 +161,7 @@ const extractExif = async (file: File): Promise<any> => {
                   data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
               }
 
-              // Lens (often unsupported in basic exif-js but we try)
+              // Lens
               data.lens = tags.LensModel || tags.LensInfo || undefined;
 
               // ISO
@@ -169,7 +172,7 @@ const extractExif = async (file: File): Promise<any> => {
               // Aperture (FNumber)
               if (tags.FNumber) {
                  const f = rationalToNumber(tags.FNumber);
-                 if (!isNaN(f)) data.aperture = `f/${f}`;
+                 if (!isNaN(f)) data.aperture = `f/${parseFloat(f.toFixed(1))}`;
               }
 
               // Shutter (ExposureTime)
@@ -188,8 +191,8 @@ const extractExif = async (file: File): Promise<any> => {
 
               // Date
               if (tags.DateTimeOriginal) {
-                  // Format: "YYYY:MM:DD HH:MM:SS"
                   const dt = tags.DateTimeOriginal.toString().trim();
+                  // Standard EXIF date format is YYYY:MM:DD HH:MM:SS
                   const parts = dt.split(' ')[0].split(':');
                   if (parts.length === 3) {
                       data.date = `${parts[0]}-${parts[1]}-${parts[2]}`;
@@ -226,28 +229,15 @@ const extractExif = async (file: File): Promise<any> => {
       };
 
       img.onerror = () => {
+          clearTimeout(timer);
           console.error("Image load error for EXIF");
           URL.revokeObjectURL(objectUrl);
           resolve({});
       };
-  });
-};
 
-const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
-   // This is used for Batch Mode mainly
-   const [base64, exif] = await Promise.all([compressImage(file), extractExif(file)]);
-   return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-          resolve({
-              base64,
-              exif,
-              width: img.naturalWidth,
-              height: img.naturalHeight
-          });
-      };
-      img.src = base64;
-   });
+      // Important: set src AFTER onload to capture the event
+      img.src = objectUrl;
+  });
 };
 
 const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string> => {
@@ -382,18 +372,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [uploadStatus, setUploadStatus] = useState<string>(''); 
   const [presets, setPresets] = useState<Presets>({ cameras: [], lenses: [] });
 
-  // -----------------------
   // Single Mode State
-  // -----------------------
-  // Raw file state
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [originalPreview, setOriginalPreview] = useState<string>('');
   const [compressedPreview, setCompressedPreview] = useState<string>('');
-  const [isParsed, setIsParsed] = useState(false); // Used to show metadata form
+  const [isParsed, setIsParsed] = useState(false); 
 
-  // Photo Data State
-  const [uploadedPhotoId, setUploadedPhotoId] = useState<string>(''); // If processed and uploaded
-  const [imageUrl, setImageUrl] = useState<string>(''); // Final URL
+  const [uploadedPhotoId, setUploadedPhotoId] = useState<string>('');
+  const [imageUrl, setImageUrl] = useState<string>('');
   const [imageDims, setImageDims] = useState<{width: number, height: number}>({ width: 0, height: 0 });
   
   const [title, setTitle] = useState('');
@@ -412,14 +398,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [longitude, setLongitude] = useState('');
   const [manualLocation, setManualLocation] = useState(false);
 
-  // Result Overlay State
   const [resultState, setResultState] = useState<{
       show: boolean; success: boolean; title: string; message: string;
   }>({ show: false, success: false, title: '', message: '' });
 
-  // -----------------------
   // Batch Mode State
-  // -----------------------
   const [batchList, setBatchList] = useState<BatchItem[]>([]);
   const [batchCategory, setBatchCategory] = useState<string>(categories[0]);
   const [batchDate, setBatchDate] = useState('');
@@ -428,7 +411,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [batchLocationName, setBatchLocationName] = useState(''); 
   const [batchManualLoc, setBatchManualLoc] = useState(false);
 
-  // Map Refs
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markerInstance = useRef<any>(null);
@@ -447,18 +429,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const todayStr = `${yyyy}-${mm}-${dd}`;
       const defaultCat = categories[0] || '默认';
 
-      client.getPresets().then(p => {
-        if(p) setPresets(p);
-      });
+      client.getPresets().then(p => { if(p) setPresets(p); });
 
       if (editingPhoto) {
         setMode('single');
         setOriginalFile(null);
         setOriginalPreview('');
-        setCompressedPreview(editingPhoto.url); // Use existing URL as preview
+        setCompressedPreview(editingPhoto.url);
         setUploadedPhotoId(editingPhoto.id);
         setImageUrl(editingPhoto.url);
-        setIsParsed(true); // Editing implies parsed
+        setIsParsed(true);
         
         setTitle(editingPhoto.title);
         setCategory(editingPhoto.category || defaultCat);
@@ -477,7 +457,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setLongitude(editingPhoto.exif.longitude ? String(editingPhoto.exif.longitude) : '');
         setManualLocation(true); 
       } else {
-        // Reset Single
         setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); 
         setUploadedPhotoId(''); setImageUrl(''); setIsParsed(false);
         setImageDims({width:0,height:0}); setTitle(''); setRating(5);
@@ -487,7 +466,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setDate(todayStr);
         setManualLocation(false);
 
-        // Reset Batch
         setBatchList([]);
         setBatchCategory(defaultCat);
         setBatchDate(todayStr);
@@ -521,12 +499,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         
         const latNum = parseFloat(latStr);
         const lngNum = parseFloat(lngStr);
-        
         if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
 
         const initMap = (startCenter: [number, number]) => {
             if (mapInstance.current) return;
-            
             mapInstance.current = L.map(mapRef.current, { center: startCenter, zoom: 4, zoomControl: false, attributionControl: false });
             const map = mapInstance.current;
             const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
@@ -543,7 +519,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             const updateCoordsAndAddress = async (lat: number, lng: number) => {
                 const latS = lat.toFixed(6);
                 const lngS = lng.toFixed(6);
-                
                 if (mode === 'single') {
                     setLatitude(latS); setLongitude(lngS);
                     if (!manualLocation) {
@@ -579,14 +554,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                  (pos) => {
                      const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                      initMap(userCenter);
-                     // Set default user location if empty
                      if (mode === 'single' && !latitude) {
                          setLatitude(pos.coords.latitude.toFixed(6));
                          setLongitude(pos.coords.longitude.toFixed(6));
                          if(!manualLocation) {
-                            fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => {
-                                if(addr) setLocation(addr);
-                            });
+                            fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => { if(addr) setLocation(addr); });
                          }
                      }
                  },
@@ -596,19 +568,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         } else {
             initMap([35.6895, 139.6917]);
         }
-        
     }, 100);
     return () => clearTimeout(timer);
   }, [isOpen, theme, mode]);
 
-  // Update map marker
   useEffect(() => {
        if (!mapInstance.current || !markerInstance.current) return;
        const latStr = mode === 'single' ? latitude : batchLat;
        const lngStr = mode === 'single' ? longitude : batchLng;
        const lat = parseFloat(latStr);
        const lng = parseFloat(lngStr);
-       
        if (!isNaN(lat) && !isNaN(lng)) {
            const cur = markerInstance.current.getLatLng();
            if (Math.abs(cur.lat - lat) > 0.0001 || Math.abs(cur.lng - lng) > 0.0001) {
@@ -618,50 +587,32 @@ export const UploadModal: React.FC<UploadModalProps> = ({
        }
   }, [latitude, longitude, batchLat, batchLng, mode]);
 
-
-  // SINGLE: Handle File Selection (Instant Preview)
   const handleSingleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setOriginalFile(file);
       setOriginalPreview(URL.createObjectURL(file));
-      
-      // Strict Reset
       setCompressedPreview('');
       setUploadedPhotoId('');
       setImageUrl('');
       setIsParsed(false); 
-      
-      setTitle(''); 
-      setCamera(''); 
-      setLens(''); 
-      setAperture(''); 
-      setShutter(''); 
-      setIso(''); 
-      setLocation(''); 
-      setFocalLength(''); 
-      setLatitude('');
-      setLongitude('');
+      setTitle(''); setCamera(''); setLens(''); setAperture(''); setShutter(''); 
+      setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
       setManualLocation(false);
     }
   };
 
-  // SINGLE: Parse Step (Compress + EXIF)
   const handleParse = async () => {
     if (!originalFile) return;
     setLoading(true);
     setUploadStatus('正在解析图片...');
-    
     try {
-        // 1. Compress (for preview)
         const compressedBase64 = await compressImage(originalFile);
         setCompressedPreview(compressedBase64);
         
-        // 2. Extract EXIF
         setUploadStatus('读取EXIF信息...');
         const exif = await extractExif(originalFile);
 
-        // Fill form
         if(exif.camera) setCamera(exif.camera);
         if(exif.lens) setLens(exif.lens);
         if(exif.iso) setIso(exif.iso);
@@ -674,13 +625,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             setLatitude(String(exif.latitude));
             setLongitude(String(exif.longitude));
             const addr = await fetchAddressFromCoords(exif.latitude, exif.longitude);
-            if(addr) {
-                setLocation(addr);
-                setManualLocation(false);
-            }
+            if(addr) { setLocation(addr); setManualLocation(false); }
         }
 
-        // Get Dims
         const img = new Image();
         img.src = compressedBase64;
         await new Promise(r => img.onload = r);
@@ -696,15 +643,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   };
 
-  // SINGLE: Upload Step (Cloud)
   const handleUploadToCloud = async () => {
       if (!originalFile) return;
-      
       setLoading(true);
       setUploadStatus('准备上传...');
 
       try {
-        // Ensure compression
         let payload = compressedPreview;
         let dims = imageDims;
 
@@ -712,7 +656,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
              setUploadStatus('正在压缩...');
              payload = await compressImage(originalFile);
              setCompressedPreview(payload);
-             
              const img = new Image();
              img.src = payload;
              await new Promise(r => img.onload = r);
@@ -721,15 +664,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         }
 
         setUploadStatus('上传到云端...');
-
         const tempPhotoData: Photo = {
             id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: dims.width, height: dims.height, exif: {} as any
         };
-        
         const result = await client.uploadPhoto(payload, tempPhotoData, token);
         setUploadedPhotoId(result.id);
         setImageUrl(result.url); 
-        
         if (!title) setTitle(originalFile.name.replace(/\.[^/.]+$/, ""));
       } catch (err: any) {
         alert("上传失败: " + err.message);
@@ -739,8 +679,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       }
   };
 
-
-  // SINGLE: Handle Final Save (Metadata Update)
   const handleSaveInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!imageUrl && !editingPhoto) return;
@@ -749,10 +687,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     const lngNum = parseFloat(longitude);
     const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
 
-    if (!hasGPS) {
-        alert("请设置地理坐标 (必选)");
-        return;
-    }
+    if (!hasGPS) { alert("请设置地理坐标 (必选)"); return; }
 
     setLoading(true);
     setUploadStatus('保存信息...');
@@ -767,8 +702,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       rating: rating,
       exif: { 
         camera, lens, aperture, shutterSpeed: shutter, iso, location, date, focalLength,
-        latitude: latNum, 
-        longitude: lngNum
+        latitude: latNum, longitude: lngNum
       }
     };
 
@@ -776,25 +710,27 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const result = await client.uploadPhoto(imageUrl, photoData, token);
       onUpload(result); 
       setResultState({
-          show: true,
-          success: true,
-          title: editingPhoto ? '修改成功' : '发布成功',
+          show: true, success: true, title: editingPhoto ? '修改成功' : '发布成功',
           message: editingPhoto ? '作品信息已更新。' : '作品及信息已成功发布。'
       });
     } catch (err: any) {
-      setResultState({
-          show: true,
-          success: false,
-          title: '操作失败',
-          message: err.message || '未知错误'
-      });
+      setResultState({ show: true, success: false, title: '操作失败', message: err.message || '未知错误' });
     } finally {
-      setLoading(false);
-      setUploadStatus('');
+      setLoading(false); setUploadStatus('');
     }
   };
 
-  // BATCH... (Kept same)
+  const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
+     const [base64, exif] = await Promise.all([compressImage(file), extractExif(file)]);
+     return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            resolve({ base64, exif, width: img.naturalWidth, height: img.naturalHeight });
+        };
+        img.src = base64;
+     });
+  };
+
   const handleBatchFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files) return;
       const files = Array.from(e.target.files);
@@ -916,9 +852,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {mode === 'single' && (
              <form onSubmit={handleSaveInfo} className="space-y-6">
                 
-                {/* 1. SELECTION & PREVIEW AREA */}
                 <div className="flex flex-col md:flex-row gap-6 items-center">
-                    {/* LEFT: Raw / Original */}
+                    {/* LEFT: Raw */}
                     <div className="flex-1 w-full space-y-2">
                         <div className={`w-full aspect-[4/3] rounded-xl border-2 border-dashed flex flex-col items-center justify-center relative overflow-hidden group transition-colors 
                            ${isDark ? 'border-white/20 bg-white/5' : 'border-black/20 bg-black/5'}
@@ -947,7 +882,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         <ArrowRight size={24} />
                     </div>
 
-                    {/* RIGHT: Compressed / Result */}
+                    {/* RIGHT: Compressed */}
                     <div className="flex-1 w-full space-y-2">
                         <div className={`w-full aspect-[4/3] rounded-xl border flex flex-col items-center justify-center relative overflow-hidden
                            ${isDark ? 'bg-black/40 border-white/10' : 'bg-gray-100 border-black/10'}
@@ -970,10 +905,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     </div>
                 </div>
 
-                {/* ACTION BUTTONS: SPLIT PARSE & UPLOAD */}
+                {/* ACTION BUTTONS */}
                 {originalFile && !uploadedPhotoId && (
                     <div className="flex gap-4">
-                        {/* Parse Button - Always visible, enabled if not loading */}
                         <button 
                             type="button"
                             onClick={handleParse}
@@ -986,7 +920,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             {loading && !isParsed ? '正在解析...' : '解析相机数据'}
                         </button>
                         
-                        {/* Upload Button - Independent, enabled if not loading */}
                         <button 
                             type="button"
                             onClick={handleUploadToCloud}
@@ -1001,7 +934,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     </div>
                 )}
                 
-                {/* 2. METADATA FORM (Visible after Parse OR manual upload, but Save enabled after Upload) */}
+                {/* METADATA FORM */}
                 {(isParsed || uploadedPhotoId || editingPhoto) && (
                     <div className="animate-fade-in space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1064,7 +997,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             </div>
                         </div>
 
-                        {/* Save button only available if uploaded (or editing existing) */}
                         {(uploadedPhotoId || editingPhoto) && (
                             <button type="submit" disabled={loading} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
                                 {loading ? '保存中...' : '保存作品信息'}
