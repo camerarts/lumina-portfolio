@@ -230,10 +230,19 @@ const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string>
         if (!addr) return '';
         
         const parts = [];
-        if (addr.district || addr.county) parts.push(addr.district || addr.county);
-        if (addr.city || addr.town) parts.push(addr.city || addr.town);
-        if (addr.state || addr.province) parts.push(addr.state || addr.province);
-        if (addr.country) parts.push(addr.country);
+        if (addr.village) parts.push(addr.village);
+        else if (addr.town) parts.push(addr.town);
+        else if (addr.suburb) parts.push(addr.suburb);
+        else if (addr.district) parts.push(addr.district);
+        else if (addr.county) parts.push(addr.county);
+
+        if (addr.city && !parts.includes(addr.city)) parts.push(addr.city);
+        
+        if (addr.state || addr.province) {
+            const region = addr.state || addr.province;
+            if (!parts.includes(region)) parts.push(region);
+        }
+        if (addr.country && !parts.includes(addr.country)) parts.push(addr.country);
 
         return parts.join(', ');
     } catch (e) {
@@ -383,6 +392,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [focalLength, setFocalLength] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  // manualLocation tracks if user typed in the box. 
+  // IMPORTANT: Map interaction should override this flag to ensure address fetch works.
   const [manualLocation, setManualLocation] = useState(false);
   const [locStatus, setLocStatus] = useState<'default' | 'loading' | 'success' | 'error'>('default');
 
@@ -526,15 +537,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 
                 if (mode === 'single') {
                     setLatitude(latS); setLongitude(lngS);
-                    if (!manualLocation) {
-                        setLocStatus('loading');
-                        const addr = await fetchAddressFromCoords(lat, lng);
-                        if (addr) {
-                             setLocation(addr);
-                             setLocStatus('success');
-                        } else {
-                             setLocStatus('error');
-                        }
+                    
+                    // Always fetch address when updating from map interaction, ignoring manualLocation flag
+                    setLocStatus('loading');
+                    const addr = await fetchAddressFromCoords(lat, lng);
+                    if (addr) {
+                            setLocation(addr);
+                            setLocStatus('success');
+                    } else {
+                            setLocStatus('error');
                     }
                 } else {
                     setBatchLat(latS); setBatchLng(lngS);
