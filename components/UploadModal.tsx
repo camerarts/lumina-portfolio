@@ -122,15 +122,33 @@ const extractExif = (file: File): Promise<any> => {
         
         const lat = getTag("GPSLatitude"); const latRef = getTag("GPSLatitudeRef");
         const lon = getTag("GPSLongitude"); const lonRef = getTag("GPSLongitudeRef");
-        if (lat && lon && latRef && lonRef) {
-           const safeLat = [Number(lat[0]), Number(lat[1]), Number(lat[2])];
-           const safeLon = [Number(lon[0]), Number(lon[1]), Number(lon[2])];
-           let ddLat = safeLat[0] + safeLat[1]/60 + safeLat[2]/3600; if(latRef === "S") ddLat *= -1;
-           let ddLon = safeLon[0] + safeLon[1]/60 + safeLon[2]/3600; if(lonRef === "W") ddLon *= -1;
-           if (!isNaN(ddLat) && !isNaN(ddLon)) { 
-             data.latitude = ddLat; 
-             data.longitude = ddLon; 
-           }
+
+        // Helper to handle Rational objects from EXIF (numerator/denominator) or simple numbers
+        const convertToNum = (val: any) => {
+            if (typeof val === 'number') return val;
+            if (val && typeof val.numerator === 'number' && typeof val.denominator === 'number') {
+                return val.denominator === 0 ? 0 : val.numerator / val.denominator;
+            }
+            return Number(val);
+        };
+
+        if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
+            const dLat = convertToNum(lat[0]);
+            const mLat = convertToNum(lat[1]);
+            const sLat = convertToNum(lat[2]);
+            let ddLat = dLat + mLat / 60 + sLat / 3600;
+            if (latRef === 'S') ddLat = -ddLat;
+
+            const dLon = convertToNum(lon[0]);
+            const mLon = convertToNum(lon[1]);
+            const sLon = convertToNum(lon[2]);
+            let ddLon = dLon + mLon / 60 + sLon / 3600;
+            if (lonRef === 'W') ddLon = -ddLon;
+
+            if (!isNaN(ddLat) && !isNaN(ddLon)) {
+                data.latitude = ddLat;
+                data.longitude = ddLon;
+            }
         }
         resolve(data);
     });
