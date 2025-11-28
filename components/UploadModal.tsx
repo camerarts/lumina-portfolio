@@ -19,6 +19,7 @@ interface SmartInputProps {
   type?: string;
   readOnly?: boolean;
   suggestions?: string[];
+  status?: 'default' | 'loading' | 'success' | 'error';
 }
 
 interface BatchItem {
@@ -245,7 +246,7 @@ const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string>
 // Sub-Components
 // ==========================================
 
-const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storageKey, placeholder, theme, type = 'text', readOnly = false, suggestions = [] }) => {
+const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storageKey, placeholder, theme, type = 'text', readOnly = false, suggestions = [], status = 'default' }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -282,9 +283,15 @@ const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storage
 
   const allOptions = Array.from(new Set([...suggestions, ...history]));
 
+  let statusClass = "";
+  if (status === 'success') statusClass = "border-green-500/50 bg-green-500/5 focus:border-green-500";
+  else if (status === 'error') statusClass = "border-red-500/50 bg-red-500/5 focus:border-red-500";
+  else if (status === 'loading') statusClass = "border-blue-500/50 bg-blue-500/5 animate-pulse";
+  else statusClass = isDark ? "bg-white/5 border-white/10 focus:bg-white/10 focus:border-white/30" : "bg-black/5 border-black/10 focus:bg-black/5 focus:border-black/30";
+
   const inputClass = isDark 
-    ? "bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-white/30 placeholder:text-white/20" 
-    : "bg-black/5 border-black/10 text-black focus:bg-black/5 focus:border-black/30 placeholder:text-black/30";
+    ? `text-white placeholder:text-white/20 ${statusClass}` 
+    : `text-black placeholder:text-black/30 ${statusClass}`;
   
   const labelClass = isDark ? "text-white/60" : "text-black/50";
   const dropdownClass = isDark ? "bg-[#1a1f35] border-white/10 text-white/80" : "bg-white border-black/10 text-black/80";
@@ -377,6 +384,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [manualLocation, setManualLocation] = useState(false);
+  const [locStatus, setLocStatus] = useState<'default' | 'loading' | 'success' | 'error'>('default');
 
   const [resultState, setResultState] = useState<{
       show: boolean; success: boolean; title: string; message: string;
@@ -452,6 +460,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setLatitude(''); setLongitude('');
         setDate(todayStr);
         setManualLocation(false);
+        setLocStatus('default');
 
         setBatchList([]);
         setBatchCategory(defaultCat);
@@ -514,11 +523,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             const updateCoordsAndAddress = async (lat: number, lng: number) => {
                 const latS = lat.toFixed(6);
                 const lngS = lng.toFixed(6);
+                
                 if (mode === 'single') {
                     setLatitude(latS); setLongitude(lngS);
                     if (!manualLocation) {
+                        setLocStatus('loading');
                         const addr = await fetchAddressFromCoords(lat, lng);
-                        if (addr) setLocation(addr);
+                        if (addr) {
+                             setLocation(addr);
+                             setLocStatus('success');
+                        } else {
+                             setLocStatus('error');
+                        }
                     }
                 } else {
                     setBatchLat(latS); setBatchLng(lngS);
@@ -590,6 +606,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setTitle(''); setCamera(''); setLens(presets.lenses[0] || ''); setAperture(''); setShutter(''); 
       setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
       setManualLocation(false);
+      setLocStatus('default');
     }
   };
 
@@ -792,6 +809,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                              if (mode === 'single' && !editingPhoto) {
                                  setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle(''); setIsParsed(false);
                                  setCamera(''); setLens(presets.lenses[0] || ''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
+                                 setLocStatus('default');
                              } else if (mode === 'batch') {
                                  setBatchList(prev => prev.filter(p => p.status !== 'success'));
                              } else if (editingPhoto) {
@@ -952,7 +970,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                 <SmartInput label="光圈" value={aperture} onChange={setAperture} storageKey="aperture" theme={theme} />
                                 <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
                                 <SmartInput label="ISO" value={iso} onChange={setIso} storageKey="iso" theme={theme} />
-                                <SmartInput label="地点" value={location} onChange={(val) => { setLocation(val); setManualLocation(true); }} storageKey="location" theme={theme} placeholder="自动获取或手动输入" />
+                                <SmartInput label="地点" value={location} onChange={(val) => { setLocation(val); setManualLocation(true); setLocStatus('default'); }} storageKey="location" theme={theme} placeholder="自动获取或手动输入" status={locStatus} />
                                 <SmartInput label="拍摄日期" value={date} onChange={setDate} storageKey="date" theme={theme} type="date" />
                             </div>
 
