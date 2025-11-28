@@ -182,6 +182,23 @@ const App: React.FC = () => {
     if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('全部'); setViewMode('grid'); window.scrollTo(0,0); }
   };
 
+  const handleRatingChange = async (photo: Photo, newRating: number) => {
+      const updatedPhoto = { ...photo, rating: newRating };
+      
+      // 1. Optimistic Update
+      setPhotos(prev => prev.map(p => p.id === photo.id ? updatedPhoto : p));
+      if (selectedPhoto?.id === photo.id) setSelectedPhoto(updatedPhoto);
+
+      // 2. Persist to API
+      try {
+          await client.uploadPhoto(photo.url, updatedPhoto, adminToken);
+      } catch (error) {
+          console.error("Failed to update rating", error);
+          alert("评级保存失败");
+          // Revert if needed, but for simplicity we keep optimistic state unless page reload
+      }
+  };
+
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
     e.stopPropagation(); e.preventDefault();
     if (window.confirm('确定删除?')) {
@@ -375,7 +392,9 @@ const App: React.FC = () => {
       <PhotoModal 
         photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} 
         onNext={handleNext} onPrev={handlePrev} hasNext={filteredPhotos.findIndex(p => p.id === selectedPhoto?.id) < filteredPhotos.length - 1} hasPrev={filteredPhotos.findIndex(p => p.id === selectedPhoto?.id) > 0} 
-        theme={theme} slideDirection={slideDirection} isAdmin={isAdmin} onUpdatePhoto={handleUpdatePhoto}
+        theme={theme} slideDirection={slideDirection} isAdmin={isAdmin} 
+        onRate={handleRatingChange}
+        onUpdatePhoto={handleUpdatePhoto}
       />
       
       <UploadModal isOpen={isUploadOpen} onClose={() => { setIsUploadOpen(false); setPhotoToEdit(null); }} onUpload={handleUpdatePhoto} theme={theme} editingPhoto={photoToEdit} token={adminToken} categories={customCategories} />
