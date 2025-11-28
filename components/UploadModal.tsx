@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine, Camera } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
-import EXIF from 'exif-js';
+import exifr from 'exifr';
 import { client } from '../api/client';
 
 // ==========================================
@@ -94,112 +93,6 @@ const compressImage = (file: File): Promise<string> => {
   });
 };
 
-// Helper: Convert EXIF Rational object (numerator/denominator) to number
-// This handles various formats returned by exif-js: Numbers, Number objects, or {numerator, denominator}
-const rationalToNumber = (data: any): number => {
-    if (data === null || data === undefined) return 0;
-    
-    // If it's already a primitive number
-    if (typeof data === 'number') return data;
-    
-    // If it's an object with numerator/denominator (common in exif-js)
-    if (typeof data === 'object' && 'numerator' in data && 'denominator' in data) {
-        const num = Number(data.numerator);
-        const den = Number(data.denominator);
-        if (den === 0) return 0;
-        return num / den;
-    }
-    
-    // If it's a Number wrapper object
-    if (data instanceof Number) return data.valueOf();
-    
-    // Try forcing number conversion
-    return Number(data) || 0;
-};
-
-// Helper to parse raw tags into our format
-const parseExifTags = (tags: any) => {
-    const data: any = {};
-    
-    // Helper to safely get string and clean null bytes
-    const getStr = (key: string) => tags[key] ? String(tags[key]).replace(/\0/g, '').trim() : '';
-
-    // 1. Camera
-    const make = getStr('Make');
-    const model = getStr('Model');
-    if (model) {
-        // If model already contains make (e.g. "Canon EOS 5D"), don't prepend make
-        data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
-    }
-
-    // 2. Lens (Try multiple tags)
-    // LensModel is 0xA434, Lens is 0xFDEA sometimes. exif-js maps common ones.
-    const lensModel = getStr('LensModel') || getStr('Lens') || getStr('LensInfo');
-    if (lensModel) data.lens = lensModel;
-
-    // 3. Technical Specs
-    if (tags['ISOSpeedRatings']) {
-        data.iso = String(tags['ISOSpeedRatings']); 
-    }
-    
-    if (tags['FNumber']) {
-        const f = rationalToNumber(tags['FNumber']);
-        if (f > 0) data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
-    }
-    
-    if (tags['ExposureTime']) {
-        const t = rationalToNumber(tags['ExposureTime']);
-        if (t > 0) {
-             // Format: 1/125s instead of 0.008s
-             data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
-        }
-    }
-
-    if (tags['FocalLength']) {
-        const fl = rationalToNumber(tags['FocalLength']);
-        if (fl > 0) data.focalLength = `${Math.round(fl)}mm`;
-    }
-
-    if (tags['DateTimeOriginal']) {
-        // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD"
-        const dt = String(tags['DateTimeOriginal']);
-        if (dt.length >= 10) {
-            data.date = dt.substring(0, 10).replace(/:/g, '-');
-        }
-    }
-
-    // 4. GPS
-    // GPS tags in exif-js are typically arrays of 3 Rationals: [Degrees, Minutes, Seconds]
-    const lat = tags['GPSLatitude'];
-    const latRef = tags['GPSLatitudeRef'];
-    const lon = tags['GPSLongitude'];
-    const lonRef = tags['GPSLongitudeRef'];
-
-    if (lat && lon && lat.length === 3 && lon.length === 3) {
-        const dLat = rationalToNumber(lat[0]);
-        const mLat = rationalToNumber(lat[1]);
-        const sLat = rationalToNumber(lat[2]);
-        
-        let ddLat = dLat + mLat / 60 + sLat / 3600;
-        if (latRef === 'S') ddLat = -ddLat;
-
-        const dLon = rationalToNumber(lon[0]);
-        const mLon = rationalToNumber(lon[1]);
-        const sLon = rationalToNumber(lon[2]);
-        
-        let ddLon = dLon + mLon / 60 + sLon / 3600;
-        if (lonRef === 'W') ddLon = -ddLon;
-
-        // Ensure valid coordinates
-        if (!isNaN(ddLat) && !isNaN(ddLon) && (ddLat !== 0 || ddLon !== 0)) {
-            data.latitude = ddLat;
-            data.longitude = ddLon;
-        }
-    }
-
-    return data;
-};
-
 const extractExif = async (file: File): Promise<any> => {
   // 1. Check file type warnings
   const type = file.type.toLowerCase();
@@ -207,42 +100,87 @@ const extractExif = async (file: File): Promise<any> => {
       alert("提示：PNG/WebP 格式通常不包含 EXIF 信息，建议使用 JPG/JPEG 原图。");
       return {};
   }
+  // exifr supports HEIC parsing if environment allows, but often browsers struggle with HEIC previews.
+  // We'll proceed but keep warning if needed.
   if (type.includes('heic')) {
-      alert("提示：HEIC 格式暂不支持直接读取 EXIF，建议先转换为 JPG。");
-      return {};
+      alert("提示：建议先导出为 JPG 上传以确保最佳兼容性。");
   }
 
-  // 2. Reliable Method: Create Image -> EXIF.getData (Standard)
-  return new Promise((resolve) => {
-      const objectUrl = URL.createObjectURL(file);
-      const img = new Image();
+  try {
+      // Use exifr to parse the file directly (File extends Blob)
+      const output = await exifr.parse(file, {
+          tiff: true,
+          exif: true,
+          gps: true,
+          mergeOutput: true // Flatten the output object
+      });
+
+      if (!output) {
+          if (!type.includes('png') && !type.includes('webp')) {
+              alert("提示：图片可能无 EXIF/已被导出压缩移除");
+          }
+          return {};
+      }
+
+      const data: any = {};
+
+      // 1. Camera
+      const make = output.Make || '';
+      const model = output.Model || '';
+      if (model) {
+          data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
+      }
+
+      // 2. Lens
+      data.lens = output.LensModel || output.Lens || output.LensInfo || undefined;
+
+      // 3. Technical Specs
+      if (output.ISO) {
+          data.iso = String(output.ISO); 
+      }
       
-      img.onload = function() {
-          // Explicitly cast 'this' to any to avoid TS errors with exif-js
-          EXIF.getData(img as any, function(this: any) {
-              // Retrieve all tags safely
-              const allTags = EXIF.getAllTags(this);
-              
-              URL.revokeObjectURL(objectUrl); // Clean up memory
-              
-              if (allTags && Object.keys(allTags).length > 0) {
-                  // console.log("EXIF Tags found:", allTags); // Debug
-                  resolve(parseExifTags(allTags));
-              } else {
-                  console.warn("No EXIF tags found in image");
-                  resolve({});
-              }
-          });
-      };
+      if (output.FNumber) {
+          // exifr returns numbers directly
+          data.aperture = `f/${Number(output.FNumber).toFixed(1)}`.replace('.0', '');
+      }
+      
+      if (output.ExposureTime) {
+          const t = Number(output.ExposureTime);
+          if (t > 0) {
+               // Format: 1/125s instead of 0.008s
+               data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+          }
+      }
 
-      img.onerror = function() {
-          URL.revokeObjectURL(objectUrl);
-          console.error("Failed to load image for EXIF extraction");
-          resolve({});
-      };
+      if (output.FocalLength) {
+          data.focalLength = `${Math.round(Number(output.FocalLength))}mm`;
+      }
 
-      img.src = objectUrl;
-  });
+      if (output.DateTimeOriginal) {
+          // exifr typically returns a Date object
+          const dt = output.DateTimeOriginal;
+          if (dt instanceof Date && !isNaN(dt.getTime())) {
+              const yyyy = dt.getFullYear();
+              const mm = String(dt.getMonth() + 1).padStart(2, '0');
+              const dd = String(dt.getDate()).padStart(2, '0');
+              data.date = `${yyyy}-${mm}-${dd}`;
+          } else if (typeof dt === 'string' && dt.length >= 10) {
+              data.date = dt.substring(0, 10).replace(/:/g, '-');
+          }
+      }
+
+      // 4. GPS
+      // exifr calculates decimal latitude/longitude automatically if gps: true
+      if (output.latitude !== undefined && output.longitude !== undefined) {
+          data.latitude = output.latitude;
+          data.longitude = output.longitude;
+      }
+
+      return data;
+  } catch (err) {
+      console.error("EXIF Parsing Error:", err);
+      return {};
+  }
 };
 
 const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
