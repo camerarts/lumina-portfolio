@@ -19,7 +19,7 @@ interface SmartInputProps {
   theme: Theme;
   type?: string;
   readOnly?: boolean;
-  suggestions?: string[]; // New: Dropdown options from backend presets
+  suggestions?: string[]; // Dropdown options from backend presets
 }
 
 interface BatchItem {
@@ -95,13 +95,25 @@ const compressImage = (file: File): Promise<string> => {
 };
 
 // Helper: Convert EXIF Rational object (numerator/denominator) to number
+// This handles various formats returned by exif-js: Numbers, Number objects, or {numerator, denominator}
 const rationalToNumber = (data: any): number => {
+    if (data === null || data === undefined) return 0;
+    
+    // If it's already a primitive number
     if (typeof data === 'number') return data;
-    if (data && typeof data === 'object' && 'numerator' in data && 'denominator' in data) {
-        if (data.denominator === 0) return 0;
-        return data.numerator / data.denominator;
+    
+    // If it's an object with numerator/denominator (common in exif-js)
+    if (typeof data === 'object' && 'numerator' in data && 'denominator' in data) {
+        const num = Number(data.numerator);
+        const den = Number(data.denominator);
+        if (den === 0) return 0;
+        return num / den;
     }
+    
+    // If it's a Number wrapper object
     if (data instanceof Number) return data.valueOf();
+    
+    // Try forcing number conversion
     return Number(data) || 0;
 };
 
@@ -127,7 +139,6 @@ const parseExifTags = (tags: any) => {
 
     // 3. Technical Specs
     if (tags['ISOSpeedRatings']) {
-        // ISO might be just a number or a rational
         data.iso = String(tags['ISOSpeedRatings']); 
     }
     
@@ -158,13 +169,13 @@ const parseExifTags = (tags: any) => {
     }
 
     // 4. GPS
+    // GPS tags in exif-js are typically arrays of 3 Rationals: [Degrees, Minutes, Seconds]
     const lat = tags['GPSLatitude'];
     const latRef = tags['GPSLatitudeRef'];
     const lon = tags['GPSLongitude'];
     const lonRef = tags['GPSLongitudeRef'];
 
     if (lat && lon && lat.length === 3 && lon.length === 3) {
-        // GPSLatitude is an array of 3 Rationals [deg, min, sec]
         const dLat = rationalToNumber(lat[0]);
         const mLat = rationalToNumber(lat[1]);
         const sLat = rationalToNumber(lat[2]);
@@ -201,8 +212,7 @@ const extractExif = async (file: File): Promise<any> => {
       return {};
   }
 
-  // 2. Reliable Method: Create Image -> EXIF.getData
-  // This avoids issues with ArrayBuffer slicing or direct file parsing on some browsers/file sizes
+  // 2. Reliable Method: Create Image -> EXIF.getData (Standard)
   return new Promise((resolve) => {
       const objectUrl = URL.createObjectURL(file);
       const img = new Image();
@@ -216,7 +226,7 @@ const extractExif = async (file: File): Promise<any> => {
               URL.revokeObjectURL(objectUrl); // Clean up memory
               
               if (allTags && Object.keys(allTags).length > 0) {
-                  console.log("EXIF extracted successfully via Image object");
+                  // console.log("EXIF Tags found:", allTags); // Debug
                   resolve(parseExifTags(allTags));
               } else {
                   console.warn("No EXIF tags found in image");
@@ -391,7 +401,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [originalPreview, setOriginalPreview] = useState<string>('');
   const [compressedPreview, setCompressedPreview] = useState<string>('');
-  const [isParsed, setIsParsed] = useState(false); // Parsed (Compressed + EXIF)
+  const [isParsed, setIsParsed] = useState(false); // Used to show metadata form
 
   // Photo Data State
   const [uploadedPhotoId, setUploadedPhotoId] = useState<string>(''); // If processed and uploaded
@@ -628,11 +638,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setOriginalFile(file);
       setOriginalPreview(URL.createObjectURL(file));
       
-      // Strict Reset of all previous photo data
+      // Strict Reset
       setCompressedPreview('');
       setUploadedPhotoId('');
       setImageUrl('');
-      setIsParsed(false); // Reset parse state
+      setIsParsed(false); 
       
       setTitle(''); 
       setCamera(''); 
@@ -642,9 +652,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setIso(''); 
       setLocation(''); 
       setFocalLength(''); 
-      // Do not reset GPS if we want to keep user current location logic, 
-      // but to fix "retains previous version info" bug, strictly resetting might be safer.
-      // However, the map init logic will try to refill it if it's empty.
       setLatitude('');
       setLongitude('');
       setManualLocation(false);
@@ -658,7 +665,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setUploadStatus('正在解析图片...');
     
     try {
-        // 1. Compress
+        // 1. Compress (for preview)
         const compressedBase64 = await compressImage(originalFile);
         setCompressedPreview(compressedBase64);
         
@@ -703,16 +710,35 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   // SINGLE: Upload Step (Cloud)
   const handleUploadToCloud = async () => {
-      if (!compressedPreview || !originalFile) return;
+      if (!originalFile) return;
+      
       setLoading(true);
-      setUploadStatus('上传到云端...');
+      setUploadStatus('准备上传...');
 
       try {
+        // Ensure compression
+        let payload = compressedPreview;
+        let dims = imageDims;
+
+        if (!payload) {
+             setUploadStatus('正在压缩...');
+             payload = await compressImage(originalFile);
+             setCompressedPreview(payload);
+             
+             const img = new Image();
+             img.src = payload;
+             await new Promise(r => img.onload = r);
+             dims = { width: img.naturalWidth, height: img.naturalHeight };
+             setImageDims(dims);
+        }
+
+        setUploadStatus('上传到云端...');
+
         const tempPhotoData: Photo = {
-            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: imageDims.width, height: imageDims.height, exif: {} as any
+            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: dims.width, height: dims.height, exif: {} as any
         };
         
-        const result = await client.uploadPhoto(compressedPreview, tempPhotoData, token);
+        const result = await client.uploadPhoto(payload, tempPhotoData, token);
         setUploadedPhotoId(result.id);
         setImageUrl(result.url); 
         
@@ -959,7 +985,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 {/* ACTION BUTTONS: SPLIT PARSE & UPLOAD */}
                 {originalFile && !uploadedPhotoId && (
                     <div className="flex gap-4">
-                        {/* Parse Button - Always visible */}
+                        {/* Parse Button - Always visible, enabled if not loading */}
                         <button 
                             type="button"
                             onClick={handleParse}
@@ -972,23 +998,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             {loading && !isParsed ? '正在解析...' : '解析相机数据'}
                         </button>
                         
-                        {/* Upload Button - Always visible, enabled after parse */}
+                        {/* Upload Button - Independent, enabled if not loading */}
                         <button 
                             type="button"
                             onClick={handleUploadToCloud}
-                            disabled={loading || !isParsed}
+                            disabled={loading}
                             className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform animate-fade-in
                                 ${isDark ? 'bg-green-600 text-white disabled:bg-green-600/30 disabled:opacity-50' : 'bg-green-600 text-white disabled:bg-green-600/30 disabled:opacity-50'}
                             `}
                         >
-                            {loading && isParsed ? <Loader2 className="animate-spin" /> : <UploadCloud />}
-                            {loading && isParsed ? '正在上传...' : '上传图片'}
+                            {loading && uploadStatus.includes('上传') ? <Loader2 className="animate-spin" /> : <UploadCloud />}
+                            {loading && uploadStatus.includes('上传') ? '正在上传...' : '上传图片'}
                         </button>
                     </div>
                 )}
                 
-                {/* 2. METADATA FORM (Visible after Parse, but Save enabled after Upload) */}
-                {(isParsed || editingPhoto) && (
+                {/* 2. METADATA FORM (Visible after Parse OR manual upload, but Save enabled after Upload) */}
+                {(isParsed || uploadedPhotoId || editingPhoto) && (
                     <div className="animate-fade-in space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
