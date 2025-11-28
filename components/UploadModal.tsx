@@ -158,8 +158,14 @@ const extractExif = async (file: File): Promise<any> => {
                   data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
               }
 
-              // Lens: Try multiple tags
-              data.lens = tags.Lens || tags.LensModel || tags.LensInfo || tags.LensID || undefined;
+              // Lens: Robust extraction including undefined tag checks
+              // Try standard LensModel first, then other common variations
+              let lens = tags.LensModel || tags.Lens || tags['Lens Model'] || tags.LensInfo || tags.LensID;
+              
+              // Sometimes exif-js returns the object for the tag if it can't parse string, we try to force string
+              if (lens) {
+                  data.lens = String(lens).trim();
+              }
 
               // ISO
               if (tags.ISOSpeedRatings) {
@@ -458,24 +464,22 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         return;
     }
     
-    // Only initialize map if the map container is rendered
-    // If mode is single, we need isParsed (or editing) for container to show
+    // Check if container needs to be rendered
     const shouldShowMap = mode === 'batch' || (mode === 'single' && (isParsed || uploadedPhotoId || editingPhoto));
     
     if (!shouldShowMap) return;
 
-    // cleanup if container changed
-    if (mapInstance.current && mapRef.current && mapInstance.current.getContainer() !== mapRef.current) {
-         mapInstance.current.remove();
-         mapInstance.current = null;
-    }
-
     const timer = setTimeout(() => {
         const L = (window as any).L;
+        // Important: check mapRef.current here inside the timeout
         if (!L || !mapRef.current) return;
         
         // Prevent double init
-        if (mapInstance.current) return;
+        if (mapInstance.current) {
+            // Force resize in case container size changed (e.g. from hidden to visible)
+            mapInstance.current.invalidateSize();
+            return;
+        }
 
         let latStr = mode === 'single' ? latitude : batchLat;
         let lngStr = mode === 'single' ? longitude : batchLng;
@@ -548,7 +552,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         } else {
             initMap([35.6895, 139.6917]);
         }
-    }, 100);
+    }, 300); // Increased timeout to ensure DOM render
     return () => clearTimeout(timer);
   }, [isOpen, theme, mode, isParsed, uploadedPhotoId, editingPhoto]);
 
@@ -660,7 +664,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
-    // Removed mandatory GPS check
+    // GPS is optional - submit whatever valid number we have, or undefined
     
     setLoading(true);
     setUploadStatus('保存信息...');
@@ -950,7 +954,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                 <div className="flex justify-between items-center mb-2">
                                     <div className="flex items-center gap-2 text-xs opacity-60">
                                         <MapPin size={12} />
-                                        <span>地理坐标 (点击地图选择)</span>
+                                        <span>地理坐标 (点击地图选择，选填)</span>
                                     </div>
                                     {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
                                 </div>
