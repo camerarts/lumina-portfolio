@@ -96,51 +96,71 @@ const compressImage = (file: File): Promise<string> => {
 
 const extractExif = (file: File): Promise<any> => {
   return new Promise((resolve) => {
-    // Add a timeout wrapper to prevent hanging forever on weird files
-    let isFinished = false;
-    const finish = (data: any) => {
-        if(isFinished) return;
-        isFinished = true;
-        resolve(data);
-    };
+    const reader = new FileReader();
 
-    setTimeout(() => {
-        finish({}); // Resolve with empty if takes too long
-    }, 8000);
+    // Read only the first 256KB of the file. 
+    // This is usually enough for EXIF and is instant even for 30MB files.
+    const slice = file.slice(0, 256 * 1024);
 
-    try {
-        EXIF.getData(file as any, function(this: any) {
-            if (!this || !this.exifdata) { finish({}); return; }
-            const getTag = (tag: string) => EXIF.getTag(this, tag);
-            
+    reader.onload = (e) => {
+        try {
+            const buffer = e.target?.result as ArrayBuffer;
+            if (!buffer) { resolve({}); return; }
+
+            const tags = EXIF.readFromBinaryFile(buffer);
+            if (!tags) { resolve({}); return; }
+
             const data: any = {};
+            
+            // Helper to safely get string and clean null bytes
+            const getStr = (key: string) => tags[key] ? String(tags[key]).replace(/\0/g, '').trim() : '';
 
-            const make = getTag('Make');
-            const model = getTag('Model');
+            // 1. Camera
+            const make = getStr('Make');
+            const model = getStr('Model');
             if (model) {
-                const cleanMake = make ? make.replace(/\0/g, '').trim() : '';
-                const cleanModel = model.replace(/\0/g, '').trim();
-                data.camera = cleanModel.startsWith(cleanMake) ? cleanModel : `${cleanMake} ${cleanModel}`.trim();
+                // If model already contains make (e.g. "Canon EOS 5D"), don't prepend make
+                data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
+            }
+
+            // 2. Lens (Try multiple tags)
+            // LensModel is 0xA434, Lens is 0xFDEA sometimes. exif-js maps common ones.
+            const lensModel = getStr('LensModel') || getStr('Lens') || getStr('LensInfo');
+            if (lensModel) data.lens = lensModel;
+
+            // 3. Technical Specs
+            if (tags['ISOSpeedRatings']) data.iso = String(tags['ISOSpeedRatings']);
+            
+            if (tags['FNumber']) {
+                const f = Number(tags['FNumber']);
+                data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
             }
             
-            const isoVal = getTag('ISOSpeedRatings'); if (isoVal) data.iso = String(isoVal);
-            const fNumber = getTag('FNumber'); if (fNumber) data.aperture = `f/${Number(fNumber).toFixed(1)}`.replace('.0', '');
-            const exposure = getTag('ExposureTime'); if (exposure) data.shutter = typeof exposure === 'number' ? (exposure < 1 ? `1/${Math.round(1/exposure)}s` : `${exposure}s`) : `${exposure.numerator}/${exposure.denominator}s`;
-            const focal = getTag('FocalLength'); if (focal) data.focalLength = `${Math.round(typeof focal === 'number' ? focal : focal.numerator / focal.denominator)}mm`;
-            const dateTag = getTag('DateTimeOriginal'); if (dateTag) data.date = dateTag.split(' ')[0].replace(/:/g, '-');
-            
-            const lat = getTag("GPSLatitude"); const latRef = getTag("GPSLatitudeRef");
-            const lon = getTag("GPSLongitude"); const lonRef = getTag("GPSLongitudeRef");
+            if (tags['ExposureTime']) {
+                const t = Number(tags['ExposureTime']);
+                // Format: 1/125s instead of 0.008s
+                data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+            }
 
-            const convertToNum = (val: any) => {
-                if (typeof val === 'number') return val;
-                if (val && typeof val.numerator === 'number' && typeof val.denominator === 'number') {
-                    return val.denominator === 0 ? 0 : val.numerator / val.denominator;
-                }
-                return Number(val);
-            };
+            if (tags['FocalLength']) {
+                const fl = Number(tags['FocalLength']);
+                data.focalLength = `${Math.round(fl)}mm`;
+            }
+
+            if (tags['DateTimeOriginal']) {
+                // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD"
+                data.date = String(tags['DateTimeOriginal']).split(' ')[0].replace(/:/g, '-');
+            }
+
+            // 4. GPS
+            const lat = tags['GPSLatitude'];
+            const latRef = tags['GPSLatitudeRef'];
+            const lon = tags['GPSLongitude'];
+            const lonRef = tags['GPSLongitudeRef'];
 
             if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
+                const convertToNum = (val: any) => Number(val);
+                
                 const dLat = convertToNum(lat[0]);
                 const mLat = convertToNum(lat[1]);
                 const sLat = convertToNum(lat[2]);
@@ -158,12 +178,17 @@ const extractExif = (file: File): Promise<any> => {
                     data.longitude = ddLon;
                 }
             }
-            finish(data);
-        });
-    } catch (e) {
-        console.warn("EXIF extraction failed", e);
-        finish({});
-    }
+
+            resolve(data);
+
+        } catch (err) {
+            console.warn("EXIF parse error", err);
+            resolve({});
+        }
+    };
+    
+    reader.onerror = () => resolve({});
+    reader.readAsArrayBuffer(slice);
   });
 };
 
@@ -600,6 +625,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
         // Fill form
         if(exif.camera) setCamera(exif.camera);
+        if(exif.lens) setLens(exif.lens);
         if(exif.iso) setIso(exif.iso);
         if(exif.aperture) setAperture(exif.aperture);
         if(exif.shutter) setShutter(exif.shutter);
@@ -833,10 +859,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {mode === 'single' && (
              <form onSubmit={handleSaveInfo} className="space-y-6">
                 
-                {/* 1. SELECTION & PREVIEW AREA */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                {/* 1. SELECTION & PREVIEW AREA - REFACTORED TO FLEX FOR ALIGNMENT */}
+                <div className="flex flex-col md:flex-row gap-6 items-center">
                     {/* LEFT: Raw / Original */}
-                    <div className="space-y-2">
+                    <div className="flex-1 w-full space-y-2">
                         <div className={`w-full aspect-[4/3] rounded-xl border-2 border-dashed flex flex-col items-center justify-center relative overflow-hidden group transition-colors 
                            ${isDark ? 'border-white/20 bg-white/5' : 'border-black/20 bg-black/5'}
                            ${!originalPreview && !editingPhoto ? 'hover:border-white/40 cursor-pointer' : ''}
@@ -859,12 +885,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         <p className={`text-xs text-center ${textSecondary}`}>原始预览 (本地)</p>
                     </div>
 
-                    {/* RIGHT: Compressed / Result */}
-                    <div className="space-y-2 relative">
-                         <div className={`hidden md:flex absolute -left-3 top-1/2 -translate-y-full -translate-x-1/2 z-10 ${isDark ? 'text-white' : 'text-black'}`}>
-                             <ArrowRight size={24} />
-                         </div>
+                    {/* CENTER ARROW (Hidden on mobile) */}
+                    <div className={`hidden md:flex flex-shrink-0 items-center justify-center w-8 ${isDark ? 'text-white/50' : 'text-black/50'}`}>
+                        <ArrowRight size={24} />
+                    </div>
 
+                    {/* RIGHT: Compressed / Result */}
+                    <div className="flex-1 w-full space-y-2">
                         <div className={`w-full aspect-[4/3] rounded-xl border flex flex-col items-center justify-center relative overflow-hidden
                            ${isDark ? 'bg-black/40 border-white/10' : 'bg-gray-100 border-black/10'}
                         `}>
