@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine } from 'lucide-react';
+import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine, Camera } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
 import EXIF from 'exif-js';
@@ -94,101 +94,120 @@ const compressImage = (file: File): Promise<string> => {
   });
 };
 
-const extractExif = (file: File): Promise<any> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-
-    // Read only the first 256KB of the file. 
-    // This is usually enough for EXIF and is instant even for 30MB files.
-    const slice = file.slice(0, 256 * 1024);
-
-    reader.onload = (e) => {
-        try {
-            const buffer = e.target?.result as ArrayBuffer;
-            if (!buffer) { resolve({}); return; }
-
-            const tags = EXIF.readFromBinaryFile(buffer);
-            if (!tags) { resolve({}); return; }
-
-            const data: any = {};
-            
-            // Helper to safely get string and clean null bytes
-            const getStr = (key: string) => tags[key] ? String(tags[key]).replace(/\0/g, '').trim() : '';
-
-            // 1. Camera
-            const make = getStr('Make');
-            const model = getStr('Model');
-            if (model) {
-                // If model already contains make (e.g. "Canon EOS 5D"), don't prepend make
-                data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
-            }
-
-            // 2. Lens (Try multiple tags)
-            // LensModel is 0xA434, Lens is 0xFDEA sometimes. exif-js maps common ones.
-            const lensModel = getStr('LensModel') || getStr('Lens') || getStr('LensInfo');
-            if (lensModel) data.lens = lensModel;
-
-            // 3. Technical Specs
-            if (tags['ISOSpeedRatings']) data.iso = String(tags['ISOSpeedRatings']);
-            
-            if (tags['FNumber']) {
-                const f = Number(tags['FNumber']);
-                data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
-            }
-            
-            if (tags['ExposureTime']) {
-                const t = Number(tags['ExposureTime']);
-                // Format: 1/125s instead of 0.008s
-                data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
-            }
-
-            if (tags['FocalLength']) {
-                const fl = Number(tags['FocalLength']);
-                data.focalLength = `${Math.round(fl)}mm`;
-            }
-
-            if (tags['DateTimeOriginal']) {
-                // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD"
-                data.date = String(tags['DateTimeOriginal']).split(' ')[0].replace(/:/g, '-');
-            }
-
-            // 4. GPS
-            const lat = tags['GPSLatitude'];
-            const latRef = tags['GPSLatitudeRef'];
-            const lon = tags['GPSLongitude'];
-            const lonRef = tags['GPSLongitudeRef'];
-
-            if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
-                const convertToNum = (val: any) => Number(val);
-                
-                const dLat = convertToNum(lat[0]);
-                const mLat = convertToNum(lat[1]);
-                const sLat = convertToNum(lat[2]);
-                let ddLat = dLat + mLat / 60 + sLat / 3600;
-                if (latRef === 'S') ddLat = -ddLat;
-
-                const dLon = convertToNum(lon[0]);
-                const mLon = convertToNum(lon[1]);
-                const sLon = convertToNum(lon[2]);
-                let ddLon = dLon + mLon / 60 + sLon / 3600;
-                if (lonRef === 'W') ddLon = -ddLon;
-
-                if (!isNaN(ddLat) && !isNaN(ddLon)) {
-                    data.latitude = ddLat;
-                    data.longitude = ddLon;
-                }
-            }
-
-            resolve(data);
-
-        } catch (err) {
-            console.warn("EXIF parse error", err);
-            resolve({});
-        }
-    };
+// Helper to parse raw tags into our format
+const parseExifTags = (tags: any) => {
+    const data: any = {};
     
-    reader.onerror = () => resolve({});
-    reader.readAsArrayBuffer(slice);
+    // Helper to safely get string and clean null bytes
+    const getStr = (key: string) => tags[key] ? String(tags[key]).replace(/\0/g, '').trim() : '';
+
+    // 1. Camera
+    const make = getStr('Make');
+    const model = getStr('Model');
+    if (model) {
+        // If model already contains make (e.g. "Canon EOS 5D"), don't prepend make
+        data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
+    }
+
+    // 2. Lens (Try multiple tags)
+    // LensModel is 0xA434, Lens is 0xFDEA sometimes. exif-js maps common ones.
+    const lensModel = getStr('LensModel') || getStr('Lens') || getStr('LensInfo');
+    if (lensModel) data.lens = lensModel;
+
+    // 3. Technical Specs
+    if (tags['ISOSpeedRatings']) data.iso = String(tags['ISOSpeedRatings']);
+    
+    if (tags['FNumber']) {
+        const f = Number(tags['FNumber']);
+        data.aperture = `f/${f.toFixed(1)}`.replace('.0', '');
+    }
+    
+    if (tags['ExposureTime']) {
+        const t = Number(tags['ExposureTime']);
+        // Format: 1/125s instead of 0.008s
+        data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+    }
+
+    if (tags['FocalLength']) {
+        const fl = Number(tags['FocalLength']);
+        data.focalLength = `${Math.round(fl)}mm`;
+    }
+
+    if (tags['DateTimeOriginal']) {
+        // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD"
+        data.date = String(tags['DateTimeOriginal']).split(' ')[0].replace(/:/g, '-');
+    }
+
+    // 4. GPS
+    const lat = tags['GPSLatitude'];
+    const latRef = tags['GPSLatitudeRef'];
+    const lon = tags['GPSLongitude'];
+    const lonRef = tags['GPSLongitudeRef'];
+
+    if (lat && lon && latRef && lonRef && lat.length === 3 && lon.length === 3) {
+        const convertToNum = (val: any) => Number(val);
+        
+        const dLat = convertToNum(lat[0]);
+        const mLat = convertToNum(lat[1]);
+        const sLat = convertToNum(lat[2]);
+        let ddLat = dLat + mLat / 60 + sLat / 3600;
+        if (latRef === 'S') ddLat = -ddLat;
+
+        const dLon = convertToNum(lon[0]);
+        const mLon = convertToNum(lon[1]);
+        const sLon = convertToNum(lon[2]);
+        let ddLon = dLon + mLon / 60 + sLon / 3600;
+        if (lonRef === 'W') ddLon = -ddLon;
+
+        if (!isNaN(ddLat) && !isNaN(ddLon)) {
+            data.latitude = ddLat;
+            data.longitude = ddLon;
+        }
+    }
+
+    return data;
+};
+
+const extractExif = async (file: File): Promise<any> => {
+  // 1. Check file type warnings
+  const type = file.type.toLowerCase();
+  if (type.includes('png') || type.includes('webp')) {
+      alert("提示：PNG/WebP 格式通常不包含 EXIF 信息，建议使用 JPG/JPEG 原图。");
+      return {};
+  }
+  if (type.includes('heic')) {
+      alert("提示：HEIC 格式暂不支持直接读取 EXIF，建议先转换为 JPG。");
+      return {};
+  }
+
+  // 2. Primary Method: ArrayBuffer
+  try {
+      // Read file as ArrayBuffer
+      const buffer = await file.arrayBuffer();
+      // Use EXIF.readFromBinaryFile directly
+      const tags = EXIF.readFromBinaryFile(buffer);
+      
+      if (tags && Object.keys(tags).length > 0) {
+          console.log("EXIF found via ArrayBuffer");
+          return parseExifTags(tags);
+      }
+  } catch (err) {
+      console.warn("ArrayBuffer EXIF extraction failed, trying fallback...", err);
+  }
+
+  // 3. Fallback Method: Standard EXIF.getData
+  // This helps if the binary read failed or returned empty for some structure reasons
+  return new Promise((resolve) => {
+      EXIF.getData(file as any, function(this: any) {
+          const tags = this.exifdata;
+          if (tags && Object.keys(tags).length > 0) {
+              console.log("EXIF found via Fallback");
+              resolve(parseExifTags(tags));
+          } else {
+              console.log("No EXIF found");
+              resolve({});
+          }
+      });
   });
 };
 
@@ -859,7 +878,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {mode === 'single' && (
              <form onSubmit={handleSaveInfo} className="space-y-6">
                 
-                {/* 1. SELECTION & PREVIEW AREA - REFACTORED TO FLEX FOR ALIGNMENT */}
+                {/* 1. SELECTION & PREVIEW AREA */}
                 <div className="flex flex-col md:flex-row gap-6 items-center">
                     {/* LEFT: Raw / Original */}
                     <div className="flex-1 w-full space-y-2">
@@ -885,7 +904,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         <p className={`text-xs text-center ${textSecondary}`}>原始预览 (本地)</p>
                     </div>
 
-                    {/* CENTER ARROW (Hidden on mobile) */}
+                    {/* CENTER ARROW */}
                     <div className={`hidden md:flex flex-shrink-0 items-center justify-center w-8 ${isDark ? 'text-white/50' : 'text-black/50'}`}>
                         <ArrowRight size={24} />
                     </div>
@@ -916,33 +935,31 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 {/* ACTION BUTTONS: SPLIT PARSE & UPLOAD */}
                 {originalFile && !uploadedPhotoId && (
                     <div className="flex gap-4">
-                        {!isParsed && (
-                             <button 
-                                type="button"
-                                onClick={handleParse}
-                                disabled={loading}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform
-                                    ${isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}
-                                `}
-                            >
-                                {loading ? <Loader2 className="animate-spin" /> : <ScanLine />}
-                                {loading ? '正在解析...' : '开始解析图片信息'}
-                            </button>
-                        )}
+                        {/* Parse Button - Always visible */}
+                        <button 
+                            type="button"
+                            onClick={handleParse}
+                            disabled={loading}
+                            className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform
+                                ${isDark ? 'bg-blue-600 text-white disabled:bg-blue-600/50' : 'bg-blue-600 text-white disabled:bg-blue-600/50'}
+                            `}
+                        >
+                            {loading && !isParsed ? <Loader2 className="animate-spin" /> : <Camera />}
+                            {loading && !isParsed ? '正在解析...' : '解析相机数据'}
+                        </button>
                         
-                        {isParsed && (
-                            <button 
-                                type="button"
-                                onClick={handleUploadToCloud}
-                                disabled={loading}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform animate-fade-in
-                                    ${isDark ? 'bg-green-600 text-white' : 'bg-green-600 text-white'}
-                                `}
-                            >
-                                {loading ? <Loader2 className="animate-spin" /> : <UploadCloud />}
-                                {loading ? '正在上传...' : '上传到云端'}
-                            </button>
-                        )}
+                        {/* Upload Button - Always visible, enabled after parse */}
+                        <button 
+                            type="button"
+                            onClick={handleUploadToCloud}
+                            disabled={loading || !isParsed}
+                            className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform animate-fade-in
+                                ${isDark ? 'bg-green-600 text-white disabled:bg-green-600/30 disabled:opacity-50' : 'bg-green-600 text-white disabled:bg-green-600/30 disabled:opacity-50'}
+                            `}
+                        >
+                            {loading && isParsed ? <Loader2 className="animate-spin" /> : <UploadCloud />}
+                            {loading && isParsed ? '正在上传...' : '上传图片'}
+                        </button>
                     </div>
                 )}
                 
