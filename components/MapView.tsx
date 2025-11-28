@@ -148,9 +148,10 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       }
 
       positions.forEach(pos => {
-        // Create a clean circle marker with REDUCED RADIUS (3)
+        // Create a clean circle marker
+        // INCREASE RADIUS for mobile usability (was 3)
         const marker = L.circleMarker(pos, {
-          radius: 3, 
+          radius: 5, 
           fillColor: theme === 'dark' ? '#fff' : '#000',
           color: 'transparent',
           weight: 0,
@@ -209,11 +210,11 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         // Marker interactions
         // Desktop Hover
         marker.on('mouseover', function (this: any) {
-          this.setStyle({ fillOpacity: 1, radius: 5 });
+          this.setStyle({ fillOpacity: 1, radius: 7 }); // Scale up slightly on hover
           this.openPopup();
         });
         
-        // Mobile Tap (Leaflet treats taps as clicks)
+        // Mobile Tap / Click
         marker.on('click', function (this: any) {
           this.openPopup();
         });
