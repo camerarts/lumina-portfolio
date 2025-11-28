@@ -952,9 +952,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                 <SmartInput label="光圈" value={aperture} onChange={setAperture} storageKey="aperture" theme={theme} />
                                 <SmartInput label="快门" value={shutter} onChange={setShutter} storageKey="shutter" theme={theme} />
                                 <SmartInput label="ISO" value={iso} onChange={setIso} storageKey="iso" theme={theme} />
-                                <div className="col-span-2">
-                                    <SmartInput label="地点" value={location} onChange={(val) => { setLocation(val); setManualLocation(true); }} storageKey="location" theme={theme} placeholder="自动获取或手动输入" />
-                                </div>
+                                <SmartInput label="地点" value={location} onChange={(val) => { setLocation(val); setManualLocation(true); }} storageKey="location" theme={theme} placeholder="自动获取或手动输入" />
+                                <SmartInput label="拍摄日期" value={date} onChange={setDate} storageKey="date" theme={theme} type="date" />
                             </div>
 
                             <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}`}>
@@ -970,10 +969,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                     <SmartInput label="经度" value={longitude} onChange={setLongitude} storageKey="gps_lng" placeholder="0.00" theme={theme} />
                                 </div>
                                 <div ref={mode === 'single' ? mapRef : null} className="w-full h-48 rounded-md overflow-hidden bg-gray-100 relative z-0" />
-                            </div>
-
-                            <div className="mt-4">
-                                <SmartInput label="拍摄日期" value={date} onChange={setDate} storageKey="date" theme={theme} type="date" />
                             </div>
                         </div>
 
