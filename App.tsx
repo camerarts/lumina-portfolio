@@ -22,6 +22,24 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
 }
 function deg2rad(deg: number) { return deg * (Math.PI / 180); }
 
+// Helper Hook for Responsive Columns
+function useColumns() {
+  const [cols, setCols] = useState(1);
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      if (w >= 1280) setCols(4); // xl
+      else if (w >= 1024) setCols(3); // lg
+      else if (w >= 768) setCols(2); // md
+      else setCols(1);
+    };
+    handleResize(); // Initial
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return cols;
+}
+
 const PAGE_SIZE = 9;
 const FEED_TABS = ['精选', '最新', '随览', '附近', '远方'];
 
@@ -67,6 +85,8 @@ const App: React.FC = () => {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [shuffleTrigger, setShuffleTrigger] = useState(0);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  
+  const numCols = useColumns();
   const isDark = theme === 'dark';
 
   useEffect(() => {
@@ -84,7 +104,6 @@ const App: React.FC = () => {
   const handleLogout = () => { setIsAdmin(false); setIsManageMode(false); setAdminToken(''); localStorage.removeItem('lumina_token'); };
 
   // === Minimal Flat Background ===
-  // Updated to match the requested split design: Very light gray for light mode content, Black for dark mode content.
   const Background = () => (
     <div className={`fixed inset-0 overflow-hidden pointer-events-none -z-10 transition-colors duration-1000 ${isDark ? 'bg-black' : 'bg-[#F9F9F9]'}`}>
     </div>
@@ -145,6 +164,15 @@ const App: React.FC = () => {
 
   const visiblePhotos = filteredPhotos.slice(0, visibleCount);
 
+  // Distribute photos into columns Left-to-Right (Row by Row visual order)
+  const columns = useMemo(() => {
+    const cols: Photo[][] = Array.from({ length: numCols }, () => []);
+    visiblePhotos.forEach((photo, i) => {
+      cols[i % numCols].push(photo);
+    });
+    return cols;
+  }, [visiblePhotos, numCols]);
+
   const handleUpdatePhoto = (newPhoto: Photo) => {
     setPhotos(prev => {
         const index = prev.findIndex(p => p.id === newPhoto.id);
@@ -178,9 +206,6 @@ const App: React.FC = () => {
 
   const displayCategories = [Category.ALL, ...customCategories, Category.HORIZONTAL, Category.VERTICAL];
   const textPrimary = isDark ? "text-white" : "text-black";
-  const textSecondary = isDark ? "text-white/50" : "text-black/50";
-
-  // Common padding logic for Header and Main to ensure alignment
   const containerPadding = "px-6 md:px-16 lg:px-24";
   const containerMaxWidth = "max-w-[1600px]";
 
@@ -190,11 +215,6 @@ const App: React.FC = () => {
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
       {/* === Header === */}
-      {/* 
-        Changed to 'sticky' so it sits in the flow. 
-        The content below will naturally start after it. 
-        'z-50' ensures it stays on top when scrolling.
-      */}
       <header className={`sticky top-0 left-0 right-0 z-50 transition-colors duration-300 border-b ${isDark ? 'bg-[#141414] border-white/5' : 'bg-white border-gray-100'}`}>
           <div className={`${containerMaxWidth} mx-auto ${containerPadding} py-6`}>
               
@@ -286,11 +306,6 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      {/* 
-        Removed fixed padding (pt-48). 
-        Added mt-6 to match the grid's gap-6 (24px). 
-        Since header is sticky, this creates exactly 24px space between header bottom and content top.
-      */}
       <main className={`mt-6 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
            <div className={`w-full h-[70vh] rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${isDark ? 'border-white/10' : 'border-black/5'}`}>
@@ -298,47 +313,51 @@ const App: React.FC = () => {
            </div>
         ) : (
           <>
-            <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-6">
-              {visiblePhotos.map((photo) => (
-                <div key={photo.id} className="break-inside-avoid animate-fade-in group relative mb-6">
-                    {/* Flat Card Design */}
-                    <div 
-                        onClick={() => handlePhotoClick(photo)}
-                        className={`
-                            relative overflow-hidden cursor-zoom-in transition-all duration-700 ease-out rounded-sm
-                            shadow-lg hover:shadow-2xl hover:-translate-y-1 
-                            bg-white 
-                            ${isManageMode ? '' : ''}
-                        `}
-                    >
-                        <img 
-                            src={photo.url} 
-                            alt={photo.title} 
-                            className="w-full h-auto object-cover block"
-                            loading="lazy"
-                        />
-                        
-                        {/* Overlay */}
-                        {!isManageMode && (
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-6">
-                                <p className="text-white font-serif text-2xl tracking-wide transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">{photo.title}</p>
-                                <div className="flex items-center gap-2 mt-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500 delay-100">
-                                    <span className="text-white/80 text-xs uppercase tracking-widest">{photo.category}</span>
-                                    {photo.exif?.location && <span className="text-white/60 text-xs">• {photo.exif.location.split(' ')[0]}</span>}
-                                </div>
-                            </div>
-                        )}
-                        
-                        {/* Manage Overlay */}
-                        {isManageMode && (
-                           <div className="absolute inset-0 bg-black/20 flex items-start justify-between p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                               <button onClick={(e) => { e.stopPropagation(); setPhotoToEdit(photo); setIsUploadOpen(true); }} className="bg-white/90 text-black p-2.5 rounded-full hover:scale-110 transition-transform shadow-xl backdrop-blur-sm"><Pencil size={16} /></button>
-                               <button onClick={(e) => handleDeletePhoto(e, photo.id)} className="bg-red-500/90 text-white p-2.5 rounded-full hover:scale-110 transition-transform shadow-xl backdrop-blur-sm"><Trash2 size={16} /></button>
+            <div className="flex gap-6 items-start">
+               {columns.map((colPhotos, colIndex) => (
+                   <div key={colIndex} className="flex-1 flex flex-col gap-6">
+                       {colPhotos.map((photo) => (
+                           <div key={photo.id} className="animate-fade-in group relative">
+                               {/* Flat Card Design */}
+                               <div 
+                                   onClick={() => handlePhotoClick(photo)}
+                                   className={`
+                                       relative overflow-hidden cursor-zoom-in transition-all duration-700 ease-out rounded-sm
+                                       shadow-lg hover:shadow-2xl hover:-translate-y-1 
+                                       bg-white 
+                                       ${isManageMode ? '' : ''}
+                                   `}
+                               >
+                                   <img 
+                                       src={photo.url} 
+                                       alt={photo.title} 
+                                       className="w-full h-auto object-cover block"
+                                       loading="lazy"
+                                   />
+                                   
+                                   {/* Overlay */}
+                                   {!isManageMode && (
+                                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-6">
+                                           <p className="text-white font-serif text-2xl tracking-wide transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">{photo.title}</p>
+                                           <div className="flex items-center gap-2 mt-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500 delay-100">
+                                               <span className="text-white/80 text-xs uppercase tracking-widest">{photo.category}</span>
+                                               {photo.exif?.location && <span className="text-white/60 text-xs">• {photo.exif.location.split(' ')[0]}</span>}
+                                           </div>
+                                       </div>
+                                   )}
+                                   
+                                   {/* Manage Overlay */}
+                                   {isManageMode && (
+                                      <div className="absolute inset-0 bg-black/20 flex items-start justify-between p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button onClick={(e) => { e.stopPropagation(); setPhotoToEdit(photo); setIsUploadOpen(true); }} className="bg-white/90 text-black p-2.5 rounded-full hover:scale-110 transition-transform shadow-xl backdrop-blur-sm"><Pencil size={16} /></button>
+                                          <button onClick={(e) => handleDeletePhoto(e, photo.id)} className="bg-red-500/90 text-white p-2.5 rounded-full hover:scale-110 transition-transform shadow-xl backdrop-blur-sm"><Trash2 size={16} /></button>
+                                      </div>
+                                   )}
+                               </div>
                            </div>
-                        )}
-                    </div>
-                </div>
-              ))}
+                       ))}
+                   </div>
+               ))}
             </div>
             
             <div ref={loadMoreRef} className="h-20 w-full opacity-0 pointer-events-none" />
