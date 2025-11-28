@@ -41,7 +41,7 @@ function useColumns() {
 }
 
 const PAGE_SIZE = 9;
-const FEED_TABS = ['精选', '最新', '随览', '附近', '远方'];
+const FEED_TABS = ['全部', '精选', '最新', '随览', '附近', '远方'];
 
 const App: React.FC = () => {
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -69,7 +69,7 @@ const App: React.FC = () => {
 
   const [activeCategory, setActiveCategory] = useState<string>(Category.ALL);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('最新');
+  const [activeTab, setActiveTab] = useState<string>('全部');
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState<string>('');
@@ -146,7 +146,7 @@ const App: React.FC = () => {
           });
         }
         break;
-      default: break; 
+      default: break; // '全部' and '最新' (default sort by date descending from API)
     }
     return result;
   }, [photos, activeCategory, activeTab, shuffleTrigger, userLocation]);
@@ -179,7 +179,7 @@ const App: React.FC = () => {
         if (index >= 0) { const u = [...prev]; u[index] = newPhoto; return u; }
         return [newPhoto, ...prev];
     });
-    if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('最新'); setViewMode('grid'); window.scrollTo(0,0); }
+    if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('全部'); setViewMode('grid'); window.scrollTo(0,0); }
   };
 
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
