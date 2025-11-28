@@ -207,8 +207,14 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         });
 
         // Marker interactions
+        // Desktop Hover
         marker.on('mouseover', function (this: any) {
           this.setStyle({ fillOpacity: 1, radius: 5 });
+          this.openPopup();
+        });
+        
+        // Mobile Tap (Leaflet treats taps as clicks)
+        marker.on('click', function (this: any) {
           this.openPopup();
         });
 
