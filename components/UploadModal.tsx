@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine, Camera } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
@@ -157,8 +158,8 @@ const extractExif = async (file: File): Promise<any> => {
                   data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
               }
 
-              // Lens
-              data.lens = tags.LensModel || tags.LensInfo || undefined;
+              // Lens: Try multiple tags
+              data.lens = tags.Lens || tags.LensModel || tags.LensInfo || tags.LensID || undefined;
 
               // ISO
               if (tags.ISOSpeedRatings) {
@@ -195,7 +196,7 @@ const extractExif = async (file: File): Promise<any> => {
                   }
               }
 
-              // GPS extraction removed per user request to force manual map selection
+              // GPS extraction disabled automatically per requirement
               
               resolve(data);
           });
@@ -457,6 +458,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         return;
     }
     
+    // Only initialize map if the map container is rendered
+    // If mode is single, we need isParsed (or editing) for container to show
+    const shouldShowMap = mode === 'batch' || (mode === 'single' && (isParsed || uploadedPhotoId || editingPhoto));
+    
+    if (!shouldShowMap) return;
+
+    // cleanup if container changed
     if (mapInstance.current && mapRef.current && mapInstance.current.getContainer() !== mapRef.current) {
          mapInstance.current.remove();
          mapInstance.current = null;
@@ -465,6 +473,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     const timer = setTimeout(() => {
         const L = (window as any).L;
         if (!L || !mapRef.current) return;
+        
+        // Prevent double init
+        if (mapInstance.current) return;
 
         let latStr = mode === 'single' ? latitude : batchLat;
         let lngStr = mode === 'single' ? longitude : batchLng;
@@ -475,7 +486,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         if (!isNaN(latNum) && !isNaN(lngNum)) center = [latNum, lngNum];
 
         const initMap = (startCenter: [number, number]) => {
-            if (mapInstance.current) return;
+            if (mapInstance.current || !mapRef.current) return;
             mapInstance.current = L.map(mapRef.current, { center: startCenter, zoom: 4, zoomControl: false, attributionControl: false });
             const map = mapInstance.current;
             const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
@@ -528,11 +539,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                      const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                      initMap(userCenter);
                      if (mode === 'single' && !latitude) {
-                         setLatitude(pos.coords.latitude.toFixed(6));
-                         setLongitude(pos.coords.longitude.toFixed(6));
-                         if(!manualLocation) {
-                            fetchAddressFromCoords(pos.coords.latitude, pos.coords.longitude).then(addr => { if(addr) setLocation(addr); });
-                         }
+                         // Default to user location but don't set it as "Locked" photo location yet unless clicked
                      }
                  },
                  (err) => initMap([35.6895, 139.6917]),
@@ -543,7 +550,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         }
     }, 100);
     return () => clearTimeout(timer);
-  }, [isOpen, theme, mode]);
+  }, [isOpen, theme, mode, isParsed, uploadedPhotoId, editingPhoto]);
 
   useEffect(() => {
        if (!mapInstance.current || !markerInstance.current) return;
@@ -594,12 +601,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         if(exif.focalLength) setFocalLength(exif.focalLength);
         if(exif.date) setDate(exif.date);
         
-        if(exif.latitude && exif.longitude) {
-            setLatitude(String(exif.latitude));
-            setLongitude(String(exif.longitude));
-            const addr = await fetchAddressFromCoords(exif.latitude, exif.longitude);
-            if(addr) { setLocation(addr); setManualLocation(false); }
-        }
+        // GPS extraction disabled automatically, so we don't set latitude/longitude here
 
         const img = new Image();
         img.src = compressedBase64;
@@ -658,10 +660,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
-    const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
-
-    if (!hasGPS) { alert("请设置地理坐标 (必选)"); return; }
-
+    // Removed mandatory GPS check
+    
     setLoading(true);
     setUploadStatus('保存信息...');
 
@@ -675,7 +675,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       rating: rating,
       exif: { 
         camera, lens, aperture, shutterSpeed: shutter, iso, location, date, focalLength,
-        latitude: latNum, longitude: lngNum
+        latitude: isNaN(latNum) ? undefined : latNum, 
+        longitude: isNaN(lngNum) ? undefined : lngNum
       }
     };
 
@@ -727,13 +728,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const lngNum = parseFloat(batchLng);
       const hasCommonGPS = !isNaN(latNum) && !isNaN(lngNum);
 
-      if (!hasCommonGPS) {
-          const missingGPS = batchList.filter(item => !item.exif.latitude || !item.exif.longitude);
-          if (missingGPS.length > 0) {
-              alert(`存在 ${missingGPS.length} 张图片缺少地理坐标。请在地图上设定统一坐标。`);
-              return;
-          }
-      }
+      // GPS warning optional
+      
       setLoading(true);
       let successCount = 0; let failCount = 0;
       const queue = [...batchList];
@@ -954,7 +950,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                                 <div className="flex justify-between items-center mb-2">
                                     <div className="flex items-center gap-2 text-xs opacity-60">
                                         <MapPin size={12} />
-                                        <span>地理坐标 <span className="text-red-400">*必填</span></span>
+                                        <span>地理坐标 (点击地图选择)</span>
                                     </div>
                                     {(latitude && longitude) && <div className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={12} /><span>已锁定</span></div>}
                                 </div>
