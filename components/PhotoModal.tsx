@@ -15,6 +15,7 @@ interface PhotoModalProps {
   slideDirection: 'left' | 'right';
   isAdmin?: boolean;
   onUpdatePhoto?: (photo: Photo) => void;
+  onRate?: (photo: Photo, rating: number) => void;
 }
 
 export const PhotoModal: React.FC<PhotoModalProps> = ({ 
@@ -27,7 +28,8 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
   theme,
   slideDirection,
   isAdmin,
-  onUpdatePhoto
+  onUpdatePhoto,
+  onRate
 }) => {
   const isDark = theme === 'dark';
   
@@ -257,7 +259,7 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
                rating={activePhoto.rating} 
                theme={theme} 
                isAdmin={isAdmin}
-               onRate={(newRating) => onUpdatePhoto?.({ ...activePhoto, rating: newRating })}
+               onRate={(newRating) => onRate?.(activePhoto, newRating)}
              />
           </div>
         </div>
