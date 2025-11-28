@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw } from 'lucide-react';
+import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
 import EXIF from 'exif-js';
@@ -49,7 +49,7 @@ interface UploadModalProps {
 
 const compressImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 10000); // 10s timeout
+    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 15000); // 15s timeout for large files
 
     const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
     const objectUrl = URL.createObjectURL(file);
@@ -105,8 +105,8 @@ const extractExif = (file: File): Promise<any> => {
     };
 
     setTimeout(() => {
-        finish({}); // Resolve with empty if takes too long (e.g. 5s)
-    }, 5000);
+        finish({}); // Resolve with empty if takes too long
+    }, 8000);
 
     try {
         EXIF.getData(file as any, function(this: any) {
@@ -323,7 +323,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [originalPreview, setOriginalPreview] = useState<string>('');
   const [compressedPreview, setCompressedPreview] = useState<string>('');
-  
+  const [isParsed, setIsParsed] = useState(false); // Parsed (Compressed + EXIF)
+
   // Photo Data State
   const [uploadedPhotoId, setUploadedPhotoId] = useState<string>(''); // If processed and uploaded
   const [imageUrl, setImageUrl] = useState<string>(''); // Final URL
@@ -391,6 +392,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setCompressedPreview(editingPhoto.url); // Use existing URL as preview
         setUploadedPhotoId(editingPhoto.id);
         setImageUrl(editingPhoto.url);
+        setIsParsed(true); // Editing implies parsed
         
         setTitle(editingPhoto.title);
         setCategory(editingPhoto.category || defaultCat);
@@ -410,7 +412,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setManualLocation(true); 
       } else {
         // Reset Single
-        setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl('');
+        setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); 
+        setUploadedPhotoId(''); setImageUrl(''); setIsParsed(false);
         setImageDims({width:0,height:0}); setTitle(''); setRating(5);
         setCategory(defaultCat);
         setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
@@ -555,13 +558,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       setOriginalFile(file);
-      // Create Object URL for instant preview (zero lag)
       setOriginalPreview(URL.createObjectURL(file));
-      // Reset subsequent states to ensure no ghost data from previous file
+      
+      // Strict Reset of all previous photo data
       setCompressedPreview('');
       setUploadedPhotoId('');
       setImageUrl('');
-      // Clear metadata fields to force new parse/input
+      setIsParsed(false); // Reset parse state
+      
       setTitle(''); 
       setCamera(''); 
       setLens(''); 
@@ -570,28 +574,31 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setIso(''); 
       setLocation(''); 
       setFocalLength(''); 
-      // Do not clear Date/GPS if we want to keep User Location, but usually cleaner to reset:
-      // We will let EXIF or Geolocation logic refill them.
+      // Do not reset GPS if we want to keep user current location logic, 
+      // but to fix "retains previous version info" bug, strictly resetting might be safer.
+      // However, the map init logic will try to refill it if it's empty.
+      setLatitude('');
+      setLongitude('');
+      setManualLocation(false);
     }
   };
 
-  // SINGLE: Process, Compress, Extract EXIF & Upload
-  const handleProcessAndUpload = async () => {
+  // SINGLE: Parse Step (Compress + EXIF)
+  const handleParse = async () => {
     if (!originalFile) return;
-    
     setLoading(true);
-    setUploadStatus('解析压缩中...');
+    setUploadStatus('正在解析图片...');
     
     try {
-        // 1. Compress Image
+        // 1. Compress
         const compressedBase64 = await compressImage(originalFile);
         setCompressedPreview(compressedBase64);
         
-        // 2. Extract EXIF from ORIGINAL file (best data)
-        setUploadStatus('提取EXIF信息...');
+        // 2. Extract EXIF
+        setUploadStatus('读取EXIF信息...');
         const exif = await extractExif(originalFile);
 
-        // Fill form fields
+        // Fill form
         if(exif.camera) setCamera(exif.camera);
         if(exif.iso) setIso(exif.iso);
         if(exif.aperture) setAperture(exif.aperture);
@@ -609,35 +616,44 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             }
         }
 
-        // Get Dimensions
+        // Get Dims
         const img = new Image();
         img.src = compressedBase64;
         await new Promise(r => img.onload = r);
         setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
 
-        // 3. Upload to Cloud
-        setUploadStatus('上传到云端...');
-        // Create a temp photo object for upload
-        const tempPhotoData: Photo = {
-            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: img.naturalWidth, height: img.naturalHeight, exif: {} as any
-        };
-        
-        const result = await client.uploadPhoto(compressedBase64, tempPhotoData, token);
-        setUploadedPhotoId(result.id);
-        setImageUrl(result.url); // Remote URL
-        
-        // Use filename as title if empty
-        if (!title) setTitle(originalFile.name.replace(/\.[^/.]+$/, ""));
+        setIsParsed(true);
 
-        setUploadStatus('');
-
-    } catch (err) {
-        console.error(err);
-        alert("处理或上传失败，请重试: " + (err as Error).message);
+    } catch(err: any) {
+        alert("解析失败: " + err.message);
     } finally {
         setLoading(false);
         setUploadStatus('');
     }
+  };
+
+  // SINGLE: Upload Step (Cloud)
+  const handleUploadToCloud = async () => {
+      if (!compressedPreview || !originalFile) return;
+      setLoading(true);
+      setUploadStatus('上传到云端...');
+
+      try {
+        const tempPhotoData: Photo = {
+            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: imageDims.width, height: imageDims.height, exif: {} as any
+        };
+        
+        const result = await client.uploadPhoto(compressedPreview, tempPhotoData, token);
+        setUploadedPhotoId(result.id);
+        setImageUrl(result.url); 
+        
+        if (!title) setTitle(originalFile.name.replace(/\.[^/.]+$/, ""));
+      } catch (err: any) {
+        alert("上传失败: " + err.message);
+      } finally {
+        setLoading(false);
+        setUploadStatus('');
+      }
   };
 
 
@@ -646,7 +662,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     e.preventDefault();
     if (!imageUrl && !editingPhoto) return;
 
-    // Validation
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
     const hasGPS = !isNaN(latNum) && !isNaN(lngNum);
@@ -661,7 +676,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     const photoData: Photo = {
       id: editingPhoto ? editingPhoto.id : uploadedPhotoId,
-      url: imageUrl, // Use the remote URL (R2)
+      url: imageUrl, 
       title: title || '未命名作品',
       category: category,
       width: imageDims.width,
@@ -675,8 +690,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     };
 
     try {
-      // Re-call uploadPhoto with the remote URL (not base64) to trigger metadata update
-      // The client handles non-base64 strings as metadata-only updates
       const result = await client.uploadPhoto(imageUrl, photoData, token);
       onUpload(result); 
       setResultState({
@@ -698,7 +711,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   };
 
-  // BATCH... (Kept mostly same, but using processImageFile helper)
+  // BATCH... (Kept same)
   const handleBatchFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files) return;
       const files = Array.from(e.target.files);
@@ -778,8 +791,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                          onClick={() => {
                              setResultState(prev => ({...prev, show: false}));
                              if (mode === 'single' && !editingPhoto) {
-                                 setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle('');
-                                 setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); 
+                                 setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); setUploadedPhotoId(''); setImageUrl(''); setTitle(''); setIsParsed(false);
+                                 setCamera(''); setLens(''); setAperture(''); setShutter(''); setIso(''); setLocation(''); setFocalLength(''); setLatitude(''); setLongitude('');
                              } else if (mode === 'batch') {
                                  setBatchList(prev => prev.filter(p => p.status !== 'success'));
                              } else if (editingPhoto) {
@@ -831,7 +844,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             {originalPreview ? (
                                 <img src={originalPreview} alt="Original" className="w-full h-full object-contain" />
                             ) : editingPhoto ? (
-                                <img src={editingPhoto.url} alt="Original" className="w-full h-full object-contain opacity-50 grayscale" /> // Indicate this is the old/remote one
+                                <img src={editingPhoto.url} alt="Original" className="w-full h-full object-contain opacity-50 grayscale" /> 
                             ) : (
                                 <div className={`flex flex-col items-center pointer-events-none ${isDark ? 'text-white/50' : 'text-black/50'}`}>
                                     <FileImage size={32} className="mb-2" />
@@ -848,7 +861,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
                     {/* RIGHT: Compressed / Result */}
                     <div className="space-y-2 relative">
-                         {/* Arrow Indicator on Desktop */}
                          <div className={`hidden md:flex absolute -left-3 top-1/2 -translate-y-full -translate-x-1/2 z-10 ${isDark ? 'text-white' : 'text-black'}`}>
                              <ArrowRight size={24} />
                          </div>
@@ -874,23 +886,41 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     </div>
                 </div>
 
-                {/* ACTION: PROCESS BUTTON */}
+                {/* ACTION BUTTONS: SPLIT PARSE & UPLOAD */}
                 {originalFile && !uploadedPhotoId && (
-                    <button 
-                        type="button"
-                        onClick={handleProcessAndUpload}
-                        disabled={loading}
-                        className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform
-                            ${isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}
-                        `}
-                    >
-                        {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                        {loading ? '正在解析...' : '开始解析 & 上传到云端'}
-                    </button>
+                    <div className="flex gap-4">
+                        {!isParsed && (
+                             <button 
+                                type="button"
+                                onClick={handleParse}
+                                disabled={loading}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform
+                                    ${isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}
+                                `}
+                            >
+                                {loading ? <Loader2 className="animate-spin" /> : <ScanLine />}
+                                {loading ? '正在解析...' : '开始解析图片信息'}
+                            </button>
+                        )}
+                        
+                        {isParsed && (
+                            <button 
+                                type="button"
+                                onClick={handleUploadToCloud}
+                                disabled={loading}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform animate-fade-in
+                                    ${isDark ? 'bg-green-600 text-white' : 'bg-green-600 text-white'}
+                                `}
+                            >
+                                {loading ? <Loader2 className="animate-spin" /> : <UploadCloud />}
+                                {loading ? '正在上传...' : '上传到云端'}
+                            </button>
+                        )}
+                    </div>
                 )}
                 
-                {/* 2. METADATA FORM (Only show after upload or if editing) */}
-                {(uploadedPhotoId || editingPhoto) && (
+                {/* 2. METADATA FORM (Visible after Parse, but Save enabled after Upload) */}
+                {(isParsed || editingPhoto) && (
                     <div className="animate-fade-in space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -952,9 +982,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             </div>
                         </div>
 
-                        <button type="submit" disabled={loading} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
-                            {loading ? '保存中...' : '保存作品信息'}
-                        </button>
+                        {/* Save button only available if uploaded (or editing existing) */}
+                        {(uploadedPhotoId || editingPhoto) && (
+                            <button type="submit" disabled={loading} className={`w-full font-semibold py-3 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 shadow-lg mb-4 ${isDark ? 'bg-white text-black shadow-white/10' : 'bg-black text-white shadow-black/10'}`}>
+                                {loading ? '保存中...' : '保存作品信息'}
+                            </button>
+                        )}
                     </div>
                 )}
              </form>
