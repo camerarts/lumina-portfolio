@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft, Map } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
@@ -249,8 +248,8 @@ const App: React.FC = () => {
                   {/* Left Group: Tabs + Map Button */}
                   <div className="flex flex-col md:flex-row items-start md:items-center gap-6 md:gap-12 w-full lg:w-auto">
                       
-                      {/* Tabs */}
-                      <div className="flex items-center gap-8 md:gap-10 overflow-x-auto w-full md:w-auto no-scrollbar pb-1 md:pb-0">
+                      {/* Tabs - Spacing reduced by half */}
+                      <div className="flex items-center gap-4 md:gap-5 overflow-x-auto w-full md:w-auto no-scrollbar pb-1 md:pb-0">
                           {FEED_TABS.map(tab => (
                             <button
                                 key={tab}
