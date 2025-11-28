@@ -92,100 +92,145 @@ const compressImage = (file: File): Promise<string> => {
   });
 };
 
+/**
+ * Helper to convert EXIF Rational objects (fractions) to numbers.
+ * Exif-js returns things like {numerator: 1, denominator: 100} or Number objects.
+ */
+const rationalToNumber = (obj: any): number => {
+  if (obj === undefined || obj === null) return NaN;
+  if (typeof obj === 'number') return obj;
+  if (obj instanceof Number) return obj.valueOf();
+  if (Array.isArray(obj)) {
+      if (obj.length > 0) return rationalToNumber(obj[0]);
+      return NaN;
+  }
+  if (typeof obj === 'object' && 'numerator' in obj && 'denominator' in obj) {
+      if (obj.denominator === 0) return 0;
+      return obj.numerator / obj.denominator;
+  }
+  return Number(obj);
+};
+
 const extractExif = async (file: File): Promise<any> => {
-  // 1. Check file type warnings
+  // 1. Warning Check
   const type = file.type.toLowerCase();
   if (type.includes('png') || type.includes('webp')) {
       alert("提示：PNG/WebP 格式通常不包含 EXIF 信息，建议使用 JPG/JPEG 原图。");
       return {};
   }
-  // exifr supports HEIC parsing if environment allows, but often browsers struggle with HEIC previews.
+  
   if (type.includes('heic')) {
-      alert("提示：建议先导出为 JPG 上传以确保最佳兼容性。");
+      alert("提示：HEIC 格式浏览器支持有限，建议先导出为 JPG 上传。");
   }
 
-  try {
-      // Access global exifr loaded via script tag in index.html
-      const exifr = (window as any).exifr;
-      if (!exifr) {
-          console.error("exifr library not loaded");
-          return {};
-      }
+  // 2. Load Image for EXIF parsing
+  // Creating a temporary Image object and letting browser decode it is robust for large files.
+  const img = new Image();
+  const objectUrl = URL.createObjectURL(file);
+  img.src = objectUrl;
 
-      // Use exifr to parse the file directly (File extends Blob)
-      const output = await exifr.parse(file, {
-          tiff: true,
-          exif: true,
-          gps: true,
-          mergeOutput: true // Flatten the output object
-      });
-
-      if (!output) {
-          if (!type.includes('png') && !type.includes('webp')) {
-              alert("提示：图片可能无 EXIF/已被导出压缩移除");
+  return new Promise((resolve) => {
+      img.onload = () => {
+          // EXIF.getData(img, callback)
+          const EXIF = (window as any).EXIF;
+          if (!EXIF) {
+              console.error("EXIF library not loaded");
+              URL.revokeObjectURL(objectUrl);
+              resolve({});
+              return;
           }
-          return {};
-      }
 
-      const data: any = {};
+          EXIF.getData(img, function(this: any) {
+              const tags = EXIF.getAllTags(this);
+              URL.revokeObjectURL(objectUrl);
+              
+              if (!tags || Object.keys(tags).length === 0) {
+                 resolve({});
+                 return;
+              }
 
-      // 1. Camera
-      const make = output.Make || '';
-      const model = output.Model || '';
-      if (model) {
-          data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
-      }
+              const data: any = {};
 
-      // 2. Lens
-      data.lens = output.LensModel || output.Lens || output.LensInfo || undefined;
+              // Camera
+              const make = tags.Make ? tags.Make.toString() : '';
+              const model = tags.Model ? tags.Model.toString() : '';
+              if (model) {
+                  data.camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : `${make} ${model}`.trim();
+              }
 
-      // 3. Technical Specs
-      if (output.ISO) {
-          data.iso = String(output.ISO); 
-      }
-      
-      if (output.FNumber) {
-          // exifr returns numbers directly
-          data.aperture = `f/${Number(output.FNumber).toFixed(1)}`.replace('.0', '');
-      }
-      
-      if (output.ExposureTime) {
-          const t = Number(output.ExposureTime);
-          if (t > 0) {
-               // Format: 1/125s instead of 0.008s
-               data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
-          }
-      }
+              // Lens (often unsupported in basic exif-js but we try)
+              data.lens = tags.LensModel || tags.LensInfo || undefined;
 
-      if (output.FocalLength) {
-          data.focalLength = `${Math.round(Number(output.FocalLength))}mm`;
-      }
+              // ISO
+              if (tags.ISOSpeedRatings) {
+                 data.iso = String(tags.ISOSpeedRatings);
+              }
 
-      if (output.DateTimeOriginal) {
-          // exifr typically returns a Date object
-          const dt = output.DateTimeOriginal;
-          if (dt instanceof Date && !isNaN(dt.getTime())) {
-              const yyyy = dt.getFullYear();
-              const mm = String(dt.getMonth() + 1).padStart(2, '0');
-              const dd = String(dt.getDate()).padStart(2, '0');
-              data.date = `${yyyy}-${mm}-${dd}`;
-          } else if (typeof dt === 'string' && dt.length >= 10) {
-              data.date = dt.substring(0, 10).replace(/:/g, '-');
-          }
-      }
+              // Aperture (FNumber)
+              if (tags.FNumber) {
+                 const f = rationalToNumber(tags.FNumber);
+                 if (!isNaN(f)) data.aperture = `f/${f}`;
+              }
 
-      // 4. GPS
-      // exifr calculates decimal latitude/longitude automatically if gps: true
-      if (output.latitude !== undefined && output.longitude !== undefined) {
-          data.latitude = output.latitude;
-          data.longitude = output.longitude;
-      }
+              // Shutter (ExposureTime)
+              if (tags.ExposureTime) {
+                 const t = rationalToNumber(tags.ExposureTime);
+                 if (!isNaN(t) && t > 0) {
+                    data.shutter = t < 1 ? `1/${Math.round(1/t)}s` : `${t}s`;
+                 }
+              }
 
-      return data;
-  } catch (err) {
-      console.error("EXIF Parsing Error:", err);
-      return {};
-  }
+              // Focal Length
+              if (tags.FocalLength) {
+                 const fl = rationalToNumber(tags.FocalLength);
+                 if (!isNaN(fl)) data.focalLength = `${Math.round(fl)}mm`;
+              }
+
+              // Date
+              if (tags.DateTimeOriginal) {
+                  // Format: "YYYY:MM:DD HH:MM:SS"
+                  const dt = tags.DateTimeOriginal.toString().trim();
+                  const parts = dt.split(' ')[0].split(':');
+                  if (parts.length === 3) {
+                      data.date = `${parts[0]}-${parts[1]}-${parts[2]}`;
+                  }
+              }
+
+              // GPS
+              const latArr = tags.GPSLatitude;
+              const latRef = tags.GPSLatitudeRef;
+              const lngArr = tags.GPSLongitude;
+              const lngRef = tags.GPSLongitudeRef;
+
+              if (latArr && lngArr && latRef && lngRef) {
+                  const convertDMSToDD = (arr: any[], ref: string) => {
+                      const d = rationalToNumber(arr[0]);
+                      const m = rationalToNumber(arr[1]);
+                      const s = rationalToNumber(arr[2]);
+                      let dd = d + m / 60 + s / 3600;
+                      if (ref === 'S' || ref === 'W') dd = dd * -1;
+                      return dd;
+                  };
+
+                  const lat = convertDMSToDD(latArr, latRef);
+                  const lng = convertDMSToDD(lngArr, lngRef);
+
+                  if (!isNaN(lat) && !isNaN(lng)) {
+                      data.latitude = lat;
+                      data.longitude = lng;
+                  }
+              }
+              
+              resolve(data);
+          });
+      };
+
+      img.onerror = () => {
+          console.error("Image load error for EXIF");
+          URL.revokeObjectURL(objectUrl);
+          resolve({});
+      };
+  });
 };
 
 const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
