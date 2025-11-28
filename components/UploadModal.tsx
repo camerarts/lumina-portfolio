@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Loader2, ChevronDown, Trash2, Star, Calendar as CalendarIcon, MapPin, CheckCircle, Cloud, Layers, Image as ImageIcon, Check, AlertCircle, ArrowRight, FileImage, RefreshCw, UploadCloud, ScanLine, Camera } from 'lucide-react';
 import { Category, Photo, Theme, DEFAULT_CATEGORIES, Presets } from '../types';
 import { GlassCard } from './GlassCard';
-import exifr from 'exifr';
 import { client } from '../api/client';
 
 // ==========================================
@@ -101,12 +100,18 @@ const extractExif = async (file: File): Promise<any> => {
       return {};
   }
   // exifr supports HEIC parsing if environment allows, but often browsers struggle with HEIC previews.
-  // We'll proceed but keep warning if needed.
   if (type.includes('heic')) {
       alert("提示：建议先导出为 JPG 上传以确保最佳兼容性。");
   }
 
   try {
+      // Access global exifr loaded via script tag in index.html
+      const exifr = (window as any).exifr;
+      if (!exifr) {
+          console.error("exifr library not loaded");
+          return {};
+      }
+
       // Use exifr to parse the file directly (File extends Blob)
       const output = await exifr.parse(file, {
           tiff: true,
