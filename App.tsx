@@ -392,17 +392,6 @@ const App: React.FC = () => {
                                        loading="lazy"
                                    />
                                    
-                                   {/* Overlay */}
-                                   {!isManageMode && (
-                                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-6">
-                                           <p className="text-white font-serif text-2xl tracking-wide transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">{photo.title}</p>
-                                           <div className="flex items-center gap-2 mt-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500 delay-100">
-                                               <span className="text-white/80 text-xs uppercase tracking-widest">{photo.category}</span>
-                                               {photo.exif?.location && <span className="text-white/60 text-xs">• {photo.exif.location.split(' ')[0]}</span>}
-                                           </div>
-                                       </div>
-                                   )}
-                                   
                                    {/* Manage Overlay */}
                                    {isManageMode && (
                                       <div className="absolute inset-0 bg-black/20 flex items-start justify-between p-4 opacity-0 group-hover:opacity-100 transition-opacity">
