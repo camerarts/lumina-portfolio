@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft, Map } from 'lucide-react';
+
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Menu, Plus, LogOut, Filter, Settings, Moon, Sun, Trash2, Pencil, Check, SlidersHorizontal, Globe, Cog, ChevronDown, AlignLeft, Map, Loader2 } from 'lucide-react';
 import { GlassCard } from './components/GlassCard';
 import { PhotoModal } from './components/PhotoModal';
 import { UploadModal } from './components/UploadModal';
@@ -39,32 +40,17 @@ function useColumns() {
   return cols;
 }
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 24; // Load batch size
 const FEED_TABS = ['全部', '精选', '最新', '随览', '附近', '远方'];
 
 const App: React.FC = () => {
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  
   const [globalLoading, setGlobalLoading] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>(DEFAULT_CATEGORIES);
-
-  useEffect(() => {
-    const fetchInitData = async () => {
-      try {
-        setGlobalLoading(true);
-        const [photosData, catsData] = await Promise.all([
-            client.getPhotos(1, 100),
-            client.getCategories()
-        ]);
-        setPhotos(photosData);
-        if (catsData && catsData.length > 0) setCustomCategories(catsData);
-      } catch (error) {
-        console.error("Failed to fetch initial data:", error);
-      } finally {
-        setGlobalLoading(false);
-      }
-    };
-    fetchInitData();
-  }, []);
 
   const [activeCategory, setActiveCategory] = useState<string>(Category.ALL);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -80,7 +66,6 @@ const App: React.FC = () => {
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
   const [theme, setTheme] = useState<Theme>('light');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [shuffleTrigger, setShuffleTrigger] = useState(0);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
@@ -88,11 +73,80 @@ const App: React.FC = () => {
   const numCols = useColumns();
   const isDark = theme === 'dark';
 
+  // Initial Data Fetch
   useEffect(() => {
+    const fetchInitData = async () => {
+      try {
+        const catsData = await client.getCategories();
+        if (catsData && catsData.length > 0) setCustomCategories(catsData);
+      } catch (error) {
+        console.error("Failed to fetch categories:", error);
+      }
+    };
+    fetchInitData();
+    
+    // Check Admin Token
     const savedToken = localStorage.getItem('lumina_token');
     if (savedToken) { setAdminToken(savedToken); setIsAdmin(true); }
   }, []);
-  
+
+  // Fetch Photos Logic
+  const fetchPhotos = useCallback(async (pageNum: number, isReset: boolean = false) => {
+      if (isReset) {
+          setGlobalLoading(true);
+          setHasMore(true);
+      } else {
+          setLoadingMore(true);
+      }
+
+      try {
+          const newPhotos = await client.getPhotos(pageNum, PAGE_SIZE);
+          
+          setPhotos(prev => {
+              // Avoid duplicates if any
+              const existingIds = new Set(isReset ? [] : prev.map(p => p.id));
+              const uniqueNew = newPhotos.filter(p => !existingIds.has(p.id));
+              return isReset ? newPhotos : [...prev, ...uniqueNew];
+          });
+          
+          if (newPhotos.length < PAGE_SIZE) {
+              setHasMore(false);
+          }
+      } catch (error) {
+          console.error("Fetch failed", error);
+      } finally {
+          setGlobalLoading(false);
+          setLoadingMore(false);
+      }
+  }, []);
+
+  // Reset and fetch when ViewMode, Tab, or Category changes
+  useEffect(() => {
+      setPage(1);
+      // If switching to Map or specific filters that rely on Client-side sorting (Nearby, Random), 
+      // we might ideally want more data, but for performance we stick to pagination.
+      fetchPhotos(1, true);
+      window.scrollTo(0,0);
+  }, [activeCategory, activeTab, shuffleTrigger, viewMode, fetchPhotos]);
+
+  // Infinite Scroll Observer
+  useEffect(() => {
+    if (loadingMore || !hasMore || viewMode === 'map') return;
+    
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+            setPage(prev => {
+                const nextPage = prev + 1;
+                fetchPhotos(nextPage, false);
+                return nextPage;
+            });
+        }
+    }, { threshold: 0.1 });
+    
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [loadingMore, hasMore, viewMode, fetchPhotos]);
+
   useEffect(() => {
     const closeDropdown = () => setIsCategoryOpen(false);
     if(isCategoryOpen) window.addEventListener('click', closeDropdown);
@@ -110,8 +164,6 @@ const App: React.FC = () => {
 
   const handleTabClick = (tab: string) => {
     if (viewMode === 'map') setViewMode('grid');
-    setGlobalLoading(true);
-    setTimeout(() => setGlobalLoading(false), 500);
     if (tab === '随览') setShuffleTrigger(prev => prev + 1);
     if ((tab === '附近' || tab === '远方') && !userLocation) {
       if ('geolocation' in navigator) {
@@ -124,6 +176,9 @@ const App: React.FC = () => {
     setActiveTab(tab);
   };
 
+  // Client-side filtering/sorting on the *fetched* data
+  // Note: For true scalability, "Rating", "Random", "Location" sorts should happen on backend.
+  // With current simple KV backend, we filter the accumulated paginated list.
   const filteredPhotos = useMemo(() => {
     let result = photos.filter(p => {
       if (activeCategory === Category.ALL) return true;
@@ -134,43 +189,36 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case '精选': result = result.filter(p => (p.rating || 0) >= 4).sort((a, b) => (b.rating || 0) - (a.rating || 0)); break;
-      case '随览': const t = shuffleTrigger; result = [...result].sort(() => Math.random() - 0.5); break;
+      case '随览': 
+          // Simple client-side shuffle of loaded items
+          const t = shuffleTrigger; 
+          result = [...result].sort(() => Math.random() - 0.5); 
+          break;
       case '附近':
       case '远方':
         if (userLocation) {
           result = result.sort((a, b) => {
-            const distA = (a.exif?.latitude && a.exif?.longitude) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, a.exif.latitude, a.exif.longitude) : 99999;
-            const distB = (b.exif?.latitude && b.exif?.longitude) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, b.exif.latitude, b.exif.longitude) : 99999;
+            const latA = a.exif?.latitude; const lngA = a.exif?.longitude;
+            const latB = b.exif?.latitude; const lngB = b.exif?.longitude;
+            const distA = (latA && lngA) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latA, lngA) : 99999;
+            const distB = (latB && lngB) ? getDistanceFromLatLonInKm(userLocation.lat, userLocation.lng, latB, lngB) : 99999;
             return activeTab === '附近' ? distA - distB : distB - distA;
           });
         }
         break;
-      default: break; // '全部' and '最新' (default sort by date descending from API)
+      default: break; // '全部' and '最新'
     }
     return result;
   }, [photos, activeCategory, activeTab, shuffleTrigger, userLocation]);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); window.scrollTo(0,0); }, [activeCategory, activeTab, shuffleTrigger, viewMode]);
-
-  useEffect(() => {
-    if (viewMode === 'map') return;
-    const observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredPhotos.length));
-    }, { threshold: 0.1 });
-    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
-    return () => observer.disconnect();
-  }, [filteredPhotos.length, viewMode]); 
-
-  const visiblePhotos = filteredPhotos.slice(0, visibleCount);
-
   // Distribute photos into columns Left-to-Right (Row by Row visual order)
   const columns = useMemo(() => {
     const cols: Photo[][] = Array.from({ length: numCols }, () => []);
-    visiblePhotos.forEach((photo, i) => {
+    filteredPhotos.forEach((photo, i) => {
       cols[i % numCols].push(photo);
     });
     return cols;
-  }, [visiblePhotos, numCols]);
+  }, [filteredPhotos, numCols]);
 
   const handleUpdatePhoto = (newPhoto: Photo) => {
     setPhotos(prev => {
@@ -178,24 +226,18 @@ const App: React.FC = () => {
         if (index >= 0) { const u = [...prev]; u[index] = newPhoto; return u; }
         return [newPhoto, ...prev];
     });
-    if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('全部'); setViewMode('grid'); window.scrollTo(0,0); }
+    if (!photoToEdit) { setActiveCategory(Category.ALL); setActiveTab('全部'); setViewMode('grid'); }
   };
 
   const handleRatingChange = async (photo: Photo, newRating: number) => {
       const updatedPhoto = { ...photo, rating: newRating };
-      
-      // 1. Optimistic Update
+      // Optimistic Update
       setPhotos(prev => prev.map(p => p.id === photo.id ? updatedPhoto : p));
       if (selectedPhoto?.id === photo.id) setSelectedPhoto(updatedPhoto);
-
-      // 2. Persist to API
+      // Persist
       try {
           await client.uploadPhoto(photo.url, updatedPhoto, adminToken);
-      } catch (error) {
-          console.error("Failed to update rating", error);
-          alert("评级保存失败");
-          // Revert if needed, but for simplicity we keep optimistic state unless page reload
-      }
+      } catch (error) {}
   };
 
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
@@ -221,12 +263,11 @@ const App: React.FC = () => {
   };
 
   const displayCategories = [Category.ALL, ...customCategories, Category.HORIZONTAL, Category.VERTICAL];
-  const textPrimary = isDark ? "text-white" : "text-black";
   const containerPadding = "px-6 md:px-16 lg:px-24";
   const containerMaxWidth = "max-w-[1600px]";
 
   return (
-    <div className={`min-h-screen font-sans selection:bg-gray-500/30 ${textPrimary}`}>
+    <div className={`min-h-screen font-sans selection:bg-gray-500/30 ${isDark ? "text-white" : "text-black"}`}>
       <Background />
       <ProgressBar isLoading={globalLoading} theme={theme} />
 
@@ -248,8 +289,8 @@ const App: React.FC = () => {
                   {/* Left Group: Tabs + Map Button */}
                   <div className="flex flex-col md:flex-row items-start md:items-center gap-6 md:gap-12 w-full lg:w-auto">
                       
-                      {/* Tabs - Spacing reduced by half */}
-                      <div className="flex items-center gap-4 md:gap-5 overflow-x-auto w-full md:w-auto no-scrollbar pb-1 md:pb-0">
+                      {/* Tabs */}
+                      <div className="flex items-center gap-8 md:gap-10 overflow-x-auto w-full md:w-auto no-scrollbar pb-1 md:pb-0">
                           {FEED_TABS.map(tab => (
                             <button
                                 key={tab}
@@ -325,7 +366,7 @@ const App: React.FC = () => {
       <main className={`mt-6 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
            <div className={`w-full h-[70vh] rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${isDark ? 'border-white/10' : 'border-black/5'}`}>
-             <MapView photos={filteredPhotos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
+             <MapView photos={photos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
            </div>
         ) : (
           <>
@@ -344,8 +385,9 @@ const App: React.FC = () => {
                                        ${isManageMode ? '' : ''}
                                    `}
                                >
+                                   {/* Optimization: Use Medium size (960px) for grid */}
                                    <img 
-                                       src={photo.url} 
+                                       src={photo.urls?.medium || photo.url} 
                                        alt={photo.title} 
                                        className="w-full h-auto object-cover block"
                                        loading="lazy"
@@ -376,9 +418,20 @@ const App: React.FC = () => {
                ))}
             </div>
             
-            <div ref={loadMoreRef} className="h-20 w-full opacity-0 pointer-events-none" />
+            {/* Infinite Scroll Trigger / Loading Indicator */}
+            {hasMore && (
+                <div ref={loadMoreRef} className="h-32 w-full flex items-center justify-center mt-12 opacity-50">
+                    {loadingMore && <Loader2 className="animate-spin" size={24} />}
+                </div>
+            )}
             
-            {filteredPhotos.length === 0 && (
+            {!hasMore && filteredPhotos.length > 0 && (
+                 <div className="text-center py-12 opacity-30 text-xs tracking-widest uppercase">
+                     - End of Collection -
+                 </div>
+            )}
+            
+            {!globalLoading && filteredPhotos.length === 0 && (
               <div className={`text-center py-40 flex flex-col items-center justify-center opacity-30`}>
                   <AlignLeft size={64} strokeWidth={0.5} className="mb-6" />
                   <p className="font-serif text-2xl tracking-widest">暂无相关作品</p>
