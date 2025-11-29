@@ -46,7 +46,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     const validItems = items.filter(i => i !== null);
     
-    // Optimization: Exclude heavy EXIF data for the list view
+    // Optimization: Exclude heavy EXIF data for the list view but keep essential fields for Modal display
     const mappedItems = validItems.map((item: any) => ({
       id: item.id,
       title: item.title,
@@ -56,12 +56,19 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       width: item.width,
       height: item.height,
       rating: item.rating,
-      // Only return simplified location info needed for map/labels
       exif: {
+          // Restore essential details for the Detail Modal
+          camera: item.exif?.camera,
+          lens: item.exif?.lens,
+          aperture: item.exif?.aperture,
+          shutterSpeed: item.exif?.shutterSpeed,
+          iso: item.exif?.iso,
+          focalLength: item.exif?.focalLength,
+
+          // Map & Overlay fields
           location: item.exif?.location || '',
           latitude: item.exif?.latitude,
           longitude: item.exif?.longitude,
-          // Keep minimal date for sorting if needed client side
           date: item.exif?.date 
       }
     }));
