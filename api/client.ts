@@ -79,7 +79,7 @@ export const client = {
   },
 
   // 获取照片列表
-  async getPhotos(page = 1, pageSize = 100, category?: string): Promise<Photo[]> {
+  async getPhotos(page = 1, pageSize = 30, category?: string): Promise<Photo[]> {
     const params = new URLSearchParams({
       page: page.toString(),
       pageSize: pageSize.toString()
@@ -110,7 +110,32 @@ export const client = {
     }
   },
 
-  // 上传或更新照片
+  // 上传多尺寸照片
+  async uploadPhotoWithVariants(files: { small: Blob, medium: Blob, large: Blob }, metadata: Photo, token: string): Promise<Photo> {
+      const formData = new FormData();
+      formData.append('meta', JSON.stringify(metadata));
+      formData.append('file_small', files.small, 'small.jpg');
+      formData.append('file_medium', files.medium, 'medium.jpg');
+      formData.append('file_large', files.large, 'large.jpg');
+
+      const res = await fetch(`${API_ROOT}/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (!res.ok) {
+        const err = await res.text().catch(() => 'Unknown Error');
+        throw new Error(`Upload failed: ${res.status} ${err}`);
+      }
+
+      const result = await res.json();
+      return { ...metadata, url: result.url, urls: result.urls, id: result.id };
+  },
+
+  // Legacy upload for single file or metadata update
   async uploadPhoto(dataUrl: string, metadata: Photo, token: string): Promise<Photo> {
     const formData = new FormData();
     formData.append('meta', JSON.stringify(metadata));
@@ -132,13 +157,12 @@ export const client = {
           u8arr[n] = bstr.charCodeAt(n);
         }
         const file = new File([u8arr], 'image.jpg', { type: mime });
+        // For legacy single upload, treat as 'file_large' or just 'file' depending on backend
         formData.append('file', file);
       } catch (e) {
         throw new Error("Failed to process image data. Please try selecting the image again.");
       }
     } else {
-      // It's likely an existing URL, so we don't send a 'file'
-      // The backend will see 'file' is missing and treat it as a metadata update
       console.log("Updating metadata only for existing image...");
     }
 
@@ -156,7 +180,7 @@ export const client = {
     }
 
     const result = await res.json();
-    return { ...metadata, url: result.url, id: result.id };
+    return { ...metadata, url: result.url, urls: result.urls, id: result.id };
   },
 
   // 批量更新照片元数据
