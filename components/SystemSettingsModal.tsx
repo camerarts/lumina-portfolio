@@ -498,10 +498,10 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
 
             {/* === BATCH EDIT TAB === */}
             {activeTab === 'batch_edit' && (
-                <div className="h-full flex flex-col md:flex-row gap-6">
+                <div className="h-full flex flex-col md:flex-row gap-6 overflow-hidden">
                     {/* Left: Selection Grid */}
-                    <div className="flex-1 flex flex-col min-h-0">
-                         <div className="flex justify-between items-center mb-2">
+                    <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-transparent">
+                         <div className="flex justify-between items-center mb-2 flex-shrink-0">
                              <h3 className={`text-xs uppercase tracking-wider ${textSecondary}`}>最近上传 ({recentPhotos.length})</h3>
                              <button onClick={selectAll} className={`text-xs underline ${textSecondary}`}>
                                  {selectedPhotos.size === recentPhotos.length ? '取消全选' : '全选'}
@@ -514,16 +514,16 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                              </div>
                          ) : (
                              <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4">
-                                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 content-start">
+                                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 auto-rows-max w-full">
                                     {recentPhotos.map(photo => (
                                         <div 
                                         key={photo.id}
                                         onClick={() => togglePhotoSelection(photo.id)}
-                                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                                        className={`relative w-full aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`}
                                         >
-                                            <img src={photo.urls?.small || photo.url} alt="" className="w-full h-full object-cover block" />
+                                            <img src={photo.urls?.small || photo.url} alt="" className="absolute inset-0 w-full h-full object-cover block" />
                                             {selectedPhotos.has(photo.id) && (
-                                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5 shadow-sm">
+                                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5 shadow-sm z-10">
                                                     <Check size={10} className="text-white" />
                                                 </div>
                                             )}
@@ -584,7 +584,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                                     <label className={`block text-xs ${textSecondary}`}>地理坐标</label>
                                     <MapPin size={12} className={textSecondary} />
                                 </div>
-                                <div ref={mapRef} className="w-full h-32 rounded bg-gray-500/10 overflow-hidden" />
+                                <div ref={mapRef} className="w-full h-32 rounded bg-gray-500/10 overflow-hidden relative z-0" />
                                 <div className="grid grid-cols-2 gap-2">
                                     <input type="number" step="any" value={batchLat} onChange={e=>setBatchLat(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="纬度" />
                                     <input type="number" step="any" value={batchLng} onChange={e=>setBatchLng(e.target.value)} className={`w-full text-xs p-2 rounded border bg-transparent ${isDark ? 'border-white/20 text-white' : 'border-black/20 text-black'}`} placeholder="经度" />
