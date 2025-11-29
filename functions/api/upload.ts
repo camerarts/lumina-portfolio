@@ -14,7 +14,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   try {
     const formData = await request.formData();
-    const file = formData.get('file') as File | null;
     const metaStr = formData.get('meta') as string;
 
     if (!metaStr) {
@@ -25,56 +24,68 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const isEdit = !!(meta.id && meta.id.length > 0);
     
     let photoId = meta.id;
-    let imageUrl = meta.url;
-    let objectKey = '';
-    let mimeType = '';
-    let sizeBytes = 0;
     
     // Inverted timestamp for descending sort
     const now = new Date().toISOString();
     const timestamp = Date.now();
     const invertedTs = 9999999999999 - timestamp;
 
-    // SCENARIO A: NEW UPLOAD or EDIT WITH NEW FILE
-    if (file && file.size > 0) {
-       // If it's a new photo, generate ID
-       if (!photoId) photoId = crypto.randomUUID();
-       
-       const ext = 'jpg'; 
-       objectKey = `photos/${photoId}.${ext}`; // Overwrite if same ID
-       
-       await env.PHOTO_BUCKET.put(objectKey, await file.arrayBuffer(), {
-         httpMetadata: { contentType: file.type },
-       });
+    if (!photoId) photoId = crypto.randomUUID();
 
-       imageUrl = `${env.IMAGE_BASE_URL}/${objectKey}`;
-       mimeType = file.type;
-       sizeBytes = file.size;
-    } 
-    // SCENARIO B: EDIT METADATA ONLY (No File)
-    else if (isEdit) {
-       // We need to fetch the existing data to preserve file info
+    // Check for existing data if editing
+    let existingData: any = null;
+    if (isEdit) {
        const lookupKey = `lookup:${photoId}`;
        const existingDataKey = await env.PHOTO_KV.get(lookupKey);
-       if (!existingDataKey) {
-         return new Response('Photo not found for editing', { status: 404 });
+       if (existingDataKey) {
+         existingData = await env.PHOTO_KV.get(existingDataKey, 'json');
        }
-       const existingData: any = await env.PHOTO_KV.get(existingDataKey, 'json');
-       
-       if (!existingData) {
-         return new Response('Photo data corrupted', { status: 500 });
-       }
-
-       // Preserve technical details
-       imageUrl = existingData.url;
-       objectKey = existingData.object_key;
-       mimeType = existingData.mime;
-       sizeBytes = existingData.size_bytes;
-       // We don't change the dataKey (timestamp) to keep position in feed, 
-       // OR we could update it to bump to top. Let's keep position for now.
-    } else {
-       return new Response('File required for new uploads', { status: 400 });
     }
+
+    // Handle Files
+    const fileSmall = formData.get('file_small') as File | null;
+    const fileMedium = formData.get('file_medium') as File | null;
+    const fileLarge = formData.get('file_large') as File | null;
+    const legacyFile = formData.get('file') as File | null; // Fallback
+
+    let urls = existingData?.urls || {};
+    let mainUrl = existingData?.url || '';
+    let objectKey = existingData?.object_key || ''; // Main/Large object key
+    let sizeBytes = existingData?.size_bytes || 0;
+
+    // Helper to upload
+    const uploadVariant = async (file: File, suffix: string) => {
+        const ext = 'jpg';
+        const key = `photos/${photoId}${suffix}.${ext}`;
+        await env.PHOTO_BUCKET.put(key, await file.arrayBuffer(), {
+            httpMetadata: { contentType: file.type },
+        });
+        return `${env.IMAGE_BASE_URL}/${key}`;
+    };
+
+    if (fileSmall || fileMedium || fileLarge) {
+        if (fileSmall) urls.small = await uploadVariant(fileSmall, '_s');
+        if (fileMedium) urls.medium = await uploadVariant(fileMedium, '_m');
+        if (fileLarge) {
+            urls.large = await uploadVariant(fileLarge, '_l');
+            // Update main attributes based on Large
+            objectKey = `photos/${photoId}_l.jpg`;
+            sizeBytes = fileLarge.size;
+            mainUrl = urls.large; 
+        }
+    } else if (legacyFile) {
+        // Fallback for old single-file upload style
+        const url = await uploadVariant(legacyFile, ''); // No suffix
+        mainUrl = url;
+        urls = { small: url, medium: url, large: url }; // Duplicate for safety
+        objectKey = `photos/${photoId}.jpg`;
+        sizeBytes = legacyFile.size;
+    }
+
+    // Ensure urls exist even if editing metadata only and no file uploaded
+    if (!urls.large && mainUrl) urls.large = mainUrl;
+    if (!urls.medium && mainUrl) urls.medium = mainUrl;
+    if (!urls.small && mainUrl) urls.small = mainUrl;
 
     // Prepare Final Data
     const photoData = {
@@ -82,48 +93,43 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       title: meta.title,
       description: meta.description || '',
       tags: [meta.category],
-      created_at: isEdit ? undefined : now, // Keep original creation date if possible, but simplified here
+      created_at: existingData ? existingData.created_at : now,
       updated_at: now,
       object_key: objectKey,
-      mime: mimeType,
+      mime: 'image/jpeg',
       size_bytes: sizeBytes,
       width: meta.width,
       height: meta.height,
       exif: meta.exif || {},
       rating: meta.rating || 0,
       is_public: 1,
-      url: imageUrl
+      url: mainUrl,
+      urls: urls 
     };
 
-    // If editing, we overwrite the OLD key. 
-    // Optimization: If we wanted to "Bump" the post, we'd delete old key and make new one.
-    // For now, let's just find the old key and overwrite the value.
-    
-    let dataKey = `data:${invertedTs}:${photoId}`; // Default for new
+    // Determine Key
+    let dataKey = `data:${invertedTs}:${photoId}`; 
     
     if (isEdit) {
        const lookupKey = `lookup:${photoId}`;
        const existingDataKey = await env.PHOTO_KV.get(lookupKey);
        if (existingDataKey) {
-         dataKey = existingDataKey; // Use the EXISTING timestamp key to preserve sort order
-         photoData.created_at = (await env.PHOTO_KV.get(existingDataKey, 'json') as any).created_at;
+         dataKey = existingDataKey;
        } else {
-         // Should have been caught above, but fallback
          await env.PHOTO_KV.put(lookupKey, dataKey);
        }
     } else {
-       // New upload: Create lookup
        const lookupKey = `lookup:${photoId}`;
        await env.PHOTO_KV.put(lookupKey, dataKey);
     }
 
-    // Write to KV
     await env.PHOTO_KV.put(dataKey, JSON.stringify(photoData));
 
     return new Response(JSON.stringify({ 
       success: true, 
       id: photoId, 
-      url: imageUrl 
+      url: mainUrl,
+      urls: urls
     }), {
       headers: { 'Content-Type': 'application/json' }
     });
