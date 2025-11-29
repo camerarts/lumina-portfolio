@@ -149,9 +149,8 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
 
       positions.forEach(pos => {
         // Create a clean circle marker
-        // Reduced radius from 5 to 2.5 (50% size reduction) per user request
         const marker = L.circleMarker(pos, {
-          radius: 2.5, 
+          radius: 5, 
           fillColor: theme === 'dark' ? '#fff' : '#000',
           color: 'transparent',
           weight: 0,
@@ -187,8 +186,9 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
                    }}
                    className="aspect-square rounded-md overflow-hidden cursor-pointer relative group/item"
                  >
+                   {/* Optimization: Use Small URL (400px) */}
                    <img 
-                     src={photo.url} 
+                     src={photo.urls?.small || photo.url} 
                      alt={photo.title} 
                      className="w-full h-full object-cover transition-transform duration-300 group-hover/item:scale-110"
                    />
@@ -208,13 +208,11 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         });
 
         // Marker interactions
-        // Desktop Hover
         marker.on('mouseover', function (this: any) {
-          this.setStyle({ fillOpacity: 1, radius: 5 }); // Scale up slightly on hover (previously 7)
+          this.setStyle({ fillOpacity: 1, radius: 7 }); 
           this.openPopup();
         });
         
-        // Mobile Tap / Click
         marker.on('click', function (this: any) {
           this.openPopup();
         });
