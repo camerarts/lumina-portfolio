@@ -29,9 +29,14 @@ export interface ExifData {
 
 export interface Photo {
   id: string;
-  url: string;
+  url: string; // Fallback / Original
+  urls?: {
+    small: string;  // 400px (Map)
+    medium: string; // 960px (Grid)
+    large: string;  // 2400px (Detail)
+  };
   title: string;
-  category: string; // Changed from Category enum to string to support dynamic categories
+  category: string; 
   exif: ExifData;
   width?: number;
   height?: number;
