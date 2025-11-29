@@ -520,7 +520,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                                        onClick={() => togglePhotoSelection(photo.id)}
                                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`}
                                      >
-                                         <img src={photo.url} alt="" className="w-full h-full object-cover" />
+                                         <img src={photo.urls?.small || photo.url} alt="" className="w-full h-full object-cover" />
                                          {selectedPhotos.has(photo.id) && (
                                              <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
                                                  <Check size={10} className="text-white" />
