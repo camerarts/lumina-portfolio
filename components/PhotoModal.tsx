@@ -211,8 +211,9 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
               style={{ zIndex: 1 }}
               onAnimationEnd={() => setExitingPhoto(null)}
             >
+              {/* Optimization: Use Large URL (2400px) */}
               <img 
-                src={exitingPhoto.url} 
+                src={exitingPhoto.urls?.large || exitingPhoto.url} 
                 alt={exitingPhoto.title} 
                 className="max-w-full max-h-full object-contain shadow-[0_20px_50px_-12px_rgba(0,0,0,0.25)] backface-hidden"
                 draggable={false}
@@ -236,8 +237,9 @@ export const PhotoModal: React.FC<PhotoModalProps> = ({
             `}
             style={{ zIndex: 2 }}
           >
+             {/* Optimization: Use Large URL (2400px) */}
              <img 
-              src={activePhoto.url} 
+              src={activePhoto.urls?.large || activePhoto.url} 
               alt={activePhoto.title} 
               className="max-w-full max-h-full object-contain pointer-events-auto shadow-[0_20px_50px_-12px_rgba(0,0,0,0.25)] select-none hover:scale-[1.01] transition-transform duration-500 ease-out backface-hidden"
               draggable={false}
