@@ -242,10 +242,9 @@ const App: React.FC = () => {
 
   const handleDeletePhoto = async (e: React.MouseEvent, photoId: string) => {
     e.stopPropagation(); e.preventDefault();
-    if (window.confirm('确定删除?')) {
-        await client.deletePhoto(photoId, adminToken);
-        setPhotos(prev => prev.filter(p => p.id !== photoId));
-    }
+    // Direct delete without confirmation
+    await client.deletePhoto(photoId, adminToken);
+    setPhotos(prev => prev.filter(p => p.id !== photoId));
   };
 
   const handlePhotoClick = (photo: Photo) => { if (!isManageMode) setSelectedPhoto(photo); };
