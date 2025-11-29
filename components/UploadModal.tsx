@@ -47,24 +47,20 @@ interface UploadModalProps {
 // Helper Functions
 // ==========================================
 
-const compressImage = (file: File): Promise<string> => {
+const resizeImage = (file: File, targetWidth: number, quality = 0.85): Promise<{ blob: Blob, width: number, height: number, dataUrl: string }> => {
   return new Promise((resolve, reject) => {
-    const timeOutId = setTimeout(() => reject(new Error("Compression timeout")), 15000); 
-
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
     
     img.onload = () => {
-      clearTimeout(timeOutId);
       URL.revokeObjectURL(objectUrl);
       let width = img.naturalWidth;
       let height = img.naturalHeight;
-      const MAX_DIMENSION = 2560;
       
-      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-        const ratio = width / height;
-        if (width > height) { width = MAX_DIMENSION; height = width / ratio; } 
-        else { height = MAX_DIMENSION; width = height * ratio; }
+      // Calculate new dimensions
+      if (width > targetWidth) {
+        height = Math.round(height * (targetWidth / width));
+        width = targetWidth;
       }
       
       const canvas = document.createElement('canvas');
@@ -72,26 +68,35 @@ const compressImage = (file: File): Promise<string> => {
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
-      ctx.drawImage(img, 0, 0, width, height);
-      let quality = 0.9;
-      let dataUrl = canvas.toDataURL('image/jpeg', quality);
       
-      const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
-      const maxStringLength = maxSizeInBytes * 1.37;
-      while (dataUrl.length > maxStringLength && quality > 0.3) {
-         quality -= 0.1;
-         dataUrl = canvas.toDataURL('image/jpeg', quality);
-      }
-      resolve(dataUrl);
+      // Better quality resizing
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      
+      canvas.toBlob((blob) => {
+        if (blob) {
+            resolve({ blob, width, height, dataUrl });
+        } else {
+            reject(new Error("Canvas to Blob failed"));
+        }
+      }, 'image/jpeg', quality);
     };
+    
     img.onerror = (e) => { 
-        clearTimeout(timeOutId);
         URL.revokeObjectURL(objectUrl); 
         reject(e); 
     };
-    // Set src after defining onload/onerror to avoid race conditions
     img.src = objectUrl;
   });
+};
+
+const compressImage = async (file: File): Promise<string> => {
+    // Legacy helper kept for compatibility if needed, but we rely on resizeImage now
+    const result = await resizeImage(file, 2400, 0.9);
+    return result.dataUrl;
 };
 
 /**
@@ -160,10 +165,7 @@ const extractExif = async (file: File): Promise<any> => {
               }
 
               // Lens: Robust extraction including undefined tag checks
-              // Try standard LensModel first, then other common variations
               let lens = tags.LensModel || tags.Lens || tags['Lens Model'] || tags.LensInfo || tags.LensID;
-              
-              // Sometimes exif-js returns the object for the tag if it can't parse string, we try to force string
               if (lens) {
                   data.lens = String(lens).trim();
               }
@@ -203,8 +205,6 @@ const extractExif = async (file: File): Promise<any> => {
                   }
               }
 
-              // GPS extraction disabled automatically per requirement
-              
               resolve(data);
           });
       };
@@ -216,7 +216,6 @@ const extractExif = async (file: File): Promise<any> => {
           resolve({});
       };
 
-      // Important: set src AFTER onload to capture the event
       img.src = objectUrl;
   });
 };
@@ -254,7 +253,7 @@ const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string>
 // ==========================================
 // Sub-Components
 // ==========================================
-
+// (SmartInput component remains unchanged)
 const SmartInput: React.FC<SmartInputProps> = ({ label, value, onChange, storageKey, placeholder, theme, type = 'text', readOnly = false, suggestions = [], status = 'default' }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
@@ -392,8 +391,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [focalLength, setFocalLength] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
-  // manualLocation tracks if user typed in the box. 
-  // IMPORTANT: Map interaction should override this flag to ensure address fetch works.
   const [manualLocation, setManualLocation] = useState(false);
   const [locStatus, setLocStatus] = useState<'default' | 'loading' | 'success' | 'error'>('default');
 
@@ -441,7 +438,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setMode('single');
         setOriginalFile(null);
         setOriginalPreview('');
-        setCompressedPreview(editingPhoto.url);
+        // Use the Medium URL for preview if available, else standard URL
+        setCompressedPreview(editingPhoto.urls?.medium || editingPhoto.url);
         setUploadedPhotoId(editingPhoto.id);
         setImageUrl(editingPhoto.url);
         setIsParsed(true);
@@ -451,16 +449,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setRating(editingPhoto.rating || 0);
         setImageDims({ width: editingPhoto.width || 0, height: editingPhoto.height || 0 });
         
-        setCamera(editingPhoto.exif.camera);
-        setLens(editingPhoto.exif.lens);
-        setAperture(editingPhoto.exif.aperture);
-        setShutter(editingPhoto.exif.shutterSpeed);
-        setIso(editingPhoto.exif.iso);
-        setLocation(editingPhoto.exif.location);
-        setDate(editingPhoto.exif.date);
-        setFocalLength(editingPhoto.exif.focalLength || '');
-        setLatitude(editingPhoto.exif.latitude ? String(editingPhoto.exif.latitude) : '');
-        setLongitude(editingPhoto.exif.longitude ? String(editingPhoto.exif.longitude) : '');
+        if (editingPhoto.exif) {
+          setCamera(editingPhoto.exif.camera);
+          setLens(editingPhoto.exif.lens);
+          setAperture(editingPhoto.exif.aperture);
+          setShutter(editingPhoto.exif.shutterSpeed);
+          setIso(editingPhoto.exif.iso);
+          setLocation(editingPhoto.exif.location);
+          setDate(editingPhoto.exif.date);
+          setFocalLength(editingPhoto.exif.focalLength || '');
+          setLatitude(editingPhoto.exif.latitude ? String(editingPhoto.exif.latitude) : '');
+          setLongitude(editingPhoto.exif.longitude ? String(editingPhoto.exif.longitude) : '');
+        }
         setManualLocation(true); 
       } else {
         setOriginalFile(null); setOriginalPreview(''); setCompressedPreview(''); 
@@ -484,26 +484,22 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   }, [isOpen, editingPhoto, categories]);
 
-  // Map Initialization
+  // Map Initialization (Same as before)
   useEffect(() => {
     if (!isOpen) {
         if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; }
         return;
     }
     
-    // Check if container needs to be rendered
     const shouldShowMap = mode === 'batch' || (mode === 'single' && (isParsed || uploadedPhotoId || editingPhoto));
     
     if (!shouldShowMap) return;
 
     const timer = setTimeout(() => {
         const L = (window as any).L;
-        // Important: check mapRef.current here inside the timeout
         if (!L || !mapRef.current) return;
         
-        // Prevent double init
         if (mapInstance.current) {
-            // Force resize in case container size changed (e.g. from hidden to visible)
             mapInstance.current.invalidateSize();
             return;
         }
@@ -537,8 +533,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 
                 if (mode === 'single') {
                     setLatitude(latS); setLongitude(lngS);
-                    
-                    // Always fetch address when updating from map interaction, ignoring manualLocation flag
                     setLocStatus('loading');
                     const addr = await fetchAddressFromCoords(lat, lng);
                     if (addr) {
@@ -576,9 +570,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                  (pos) => {
                      const userCenter: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                      initMap(userCenter);
-                     if (mode === 'single' && !latitude) {
-                         // Default to user location but don't set it as "Locked" photo location yet unless clicked
-                     }
                  },
                  (err) => initMap([35.6895, 139.6917]),
                  { timeout: 5000 }
@@ -586,7 +577,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         } else {
             initMap([35.6895, 139.6917]);
         }
-    }, 300); // Increased timeout to ensure DOM render
+    }, 300);
     return () => clearTimeout(timer);
   }, [isOpen, theme, mode, isParsed, uploadedPhotoId, editingPhoto]);
 
@@ -626,8 +617,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setLoading(true);
     setUploadStatus('正在解析图片...');
     try {
-        const compressedBase64 = await compressImage(originalFile);
-        setCompressedPreview(compressedBase64);
+        // Just use medium size for preview during parsing
+        const { dataUrl, width, height } = await resizeImage(originalFile, 960);
+        setCompressedPreview(dataUrl);
+        setImageDims({ width, height });
         
         setUploadStatus('读取EXIF信息...');
         const exif = await extractExif(originalFile);
@@ -640,13 +633,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         if(exif.focalLength) setFocalLength(exif.focalLength);
         if(exif.date) setDate(exif.date);
         
-        // GPS extraction disabled automatically, so we don't set latitude/longitude here
-
-        const img = new Image();
-        img.src = compressedBase64;
-        await new Promise(r => img.onload = r);
-        setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
-
         setIsParsed(true);
 
     } catch(err: any) {
@@ -660,31 +646,41 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const handleUploadToCloud = async () => {
       if (!originalFile) return;
       setLoading(true);
-      setUploadStatus('准备上传...');
-
+      
       try {
-        let payload = compressedPreview;
-        let dims = imageDims;
+        // 1. Generate Variants
+        setUploadStatus('生成多尺寸版本...');
+        
+        const [small, medium, large] = await Promise.all([
+             resizeImage(originalFile, 400),
+             resizeImage(originalFile, 960),
+             resizeImage(originalFile, 2400)
+        ]);
 
-        if (!payload) {
-             setUploadStatus('正在压缩...');
-             payload = await compressImage(originalFile);
-             setCompressedPreview(payload);
-             const img = new Image();
-             img.src = payload;
-             await new Promise(r => img.onload = r);
-             dims = { width: img.naturalWidth, height: img.naturalHeight };
-             setImageDims(dims);
-        }
-
+        // 2. Upload
         setUploadStatus('上传到云端...');
         const tempPhotoData: Photo = {
-            id: '', url: '', title: title || originalFile.name.replace(/\.[^/.]+$/, ""), category, rating, width: dims.width, height: dims.height, exif: {} as any
+            id: '', 
+            url: '', // Will be filled by backend
+            title: title || originalFile.name.replace(/\.[^/.]+$/, ""), 
+            category, 
+            rating, 
+            width: medium.width, 
+            height: medium.height, 
+            exif: {} as any
         };
-        const result = await client.uploadPhoto(payload, tempPhotoData, token);
+        
+        // Use extended upload method for multiple files
+        const result = await client.uploadPhotoWithVariants(
+            { small: small.blob, medium: medium.blob, large: large.blob },
+            tempPhotoData, 
+            token
+        );
+        
         setUploadedPhotoId(result.id);
-        setImageUrl(result.url); 
+        setImageUrl(result.url); // This usually points to large or medium as fallback
         if (!title) setTitle(originalFile.name.replace(/\.[^/.]+$/, ""));
+
       } catch (err: any) {
         alert("上传失败: " + err.message);
       } finally {
@@ -699,7 +695,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     const latNum = parseFloat(latitude);
     const lngNum = parseFloat(longitude);
-    // GPS is optional - submit whatever valid number we have, or undefined
     
     setLoading(true);
     setUploadStatus('保存信息...');
@@ -720,6 +715,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     };
 
     try {
+      // For metadata update only, we pass null as file data
       const result = await client.uploadPhoto(imageUrl, photoData, token);
       onUpload(result); 
       setResultState({
@@ -733,27 +729,19 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   };
 
-  const processImageFile = async (file: File): Promise<{base64: string, exif: any, width: number, height: number}> => {
-     const [base64, exif] = await Promise.all([compressImage(file), extractExif(file)]);
-     return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-            resolve({ base64, exif, width: img.naturalWidth, height: img.naturalHeight });
-        };
-        img.src = base64;
-     });
-  };
-
   const handleBatchFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files) return;
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
       const newItems: BatchItem[] = [];
+      
       for (const file of files) {
           const id = Math.random().toString(36).substr(2, 9);
           try {
-             const { base64, width, height, exif } = await processImageFile(file);
-             newItems.push({ id, file, status: 'pending', thumbnail: base64, width, height, exif });
+             // Generate small thumb for batch list UI
+             const { dataUrl, width, height } = await resizeImage(file, 200); 
+             const exif = await extractExif(file);
+             newItems.push({ id, file, status: 'pending', thumbnail: dataUrl, width, height, exif });
           } catch (e) {}
       }
       setBatchList(prev => [...prev, ...newItems]);
@@ -766,8 +754,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const latNum = parseFloat(batchLat);
       const lngNum = parseFloat(batchLng);
       const hasCommonGPS = !isNaN(latNum) && !isNaN(lngNum);
-
-      // GPS warning optional
       
       setLoading(true);
       let successCount = 0; let failCount = 0;
@@ -778,9 +764,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           if (item.status === 'success') { successCount++; continue; }
           setBatchList(prev => prev.map(p => p.id === item.id ? { ...p, status: 'uploading' } : p));
           try {
+              // Generate variants for batch item
+              const [small, medium, large] = await Promise.all([
+                  resizeImage(item.file, 400),
+                  resizeImage(item.file, 960),
+                  resizeImage(item.file, 2400)
+              ]);
+
               const title = item.file.name.replace(/\.[^/.]+$/, "");
               const photoData: Photo = {
-                  id: '', url: '', title: title, category: batchCategory, rating: 5, width: item.width, height: item.height,
+                  id: '', url: '', title: title, category: batchCategory, rating: 5, width: medium.width, height: medium.height,
                   exif: {
                       ...item.exif,
                       date: batchDate || item.exif.date,
@@ -789,7 +782,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       longitude: hasCommonGPS ? lngNum : item.exif.longitude
                   }
               };
-              const result = await client.uploadPhoto(item.thumbnail, photoData, token);
+              
+              const result = await client.uploadPhotoWithVariants(
+                  { small: small.blob, medium: medium.blob, large: large.blob }, 
+                  photoData, 
+                  token
+              );
+              
               onUpload(result);
               setBatchList(prev => prev.map(p => p.id === item.id ? { ...p, status: 'success' } : p));
               successCount++;
@@ -871,7 +870,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             {originalPreview ? (
                                 <img src={originalPreview} alt="Original" className="w-full h-full object-contain" />
                             ) : editingPhoto ? (
-                                <img src={editingPhoto.url} alt="Original" className="w-full h-full object-contain opacity-50 grayscale" /> 
+                                <img src={editingPhoto.urls?.medium || editingPhoto.url} alt="Original" className="w-full h-full object-contain opacity-50 grayscale" /> 
                             ) : (
                                 <div className={`flex flex-col items-center pointer-events-none ${isDark ? 'text-white/50' : 'text-black/50'}`}>
                                     <FileImage size={32} className="mb-2" />
