@@ -6,31 +6,28 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const url = new URL(request.url);
   
   let page = parseInt(url.searchParams.get('page') || '1');
-  const pageSize = parseInt(url.searchParams.get('pageSize') || '100');
+  const pageSize = parseInt(url.searchParams.get('pageSize') || '30');
   
   if (page < 1) page = 1;
 
-  // KV List Strategy:
-  // Keys are sorted by inverted timestamp (Newest first).
-  
   try {
     if (!env.PHOTO_KV) {
       throw new Error('PHOTO_KV binding is missing in Cloudflare configuration');
     }
 
-    const limit = page * pageSize;
-    // Cap at 1000 (KV list limit)
-    const safeLimit = Math.min(limit, 1000);
+    // List Limit: Cloudflare lists up to 1000 keys.
+    // For proper pagination beyond 1000 items, we would need 'cursor' support.
+    // For this implementation, we list 1000 and slice manually for pages within that range.
+    // Ideally, pass 'cursor' from frontend for true infinite scroll > 1000 items.
     
     const listResult = await env.PHOTO_KV.list({ 
       prefix: 'data:', 
-      limit: safeLimit 
+      limit: 1000 
     });
 
     const totalKeys = listResult.keys;
     const startIndex = (page - 1) * pageSize;
     
-    // If requesting a page beyond available items
     if (startIndex >= totalKeys.length) {
        return new Response(JSON.stringify({ items: [] }), { 
          headers: { 'Content-Type': 'application/json' } 
@@ -39,29 +36,34 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     const pageKeys = totalKeys.slice(startIndex, startIndex + pageSize);
 
-    // Fetch full metadata in parallel with individual error handling
     const items = await Promise.all(pageKeys.map(async (key) => {
        try {
          return await env.PHOTO_KV.get(key.name, 'json');
        } catch (e) {
-         console.error(`Failed to fetch key ${key.name}`, e);
          return null;
        }
     }));
 
-    // Filter nulls and map to expected structure
     const validItems = items.filter(i => i !== null);
     
+    // Optimization: Exclude heavy EXIF data for the list view
     const mappedItems = validItems.map((item: any) => ({
       id: item.id,
       title: item.title,
-      description: item.description,
       category: item.tags?.[0] || '全部',
       url: item.url,
+      urls: item.urls || { small: item.url, medium: item.url, large: item.url },
       width: item.width,
       height: item.height,
       rating: item.rating,
-      exif: item.exif // Stored as object in KV
+      // Only return simplified location info needed for map/labels
+      exif: {
+          location: item.exif?.location || '',
+          latitude: item.exif?.latitude,
+          longitude: item.exif?.longitude,
+          // Keep minimal date for sorting if needed client side
+          date: item.exif?.date 
+      }
     }));
 
     return new Response(JSON.stringify({ items: mappedItems }), {
