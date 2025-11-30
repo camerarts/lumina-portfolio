@@ -247,7 +247,15 @@ const App: React.FC = () => {
     setPhotos(prev => prev.filter(p => p.id !== photoId));
   };
 
-  const handlePhotoClick = (photo: Photo) => { if (!isManageMode) setSelectedPhoto(photo); };
+  // Memoize handlers to prevent re-renders in MapView
+  const handlePhotoClick = useCallback((photo: Photo) => { 
+      if (!isManageMode) setSelectedPhoto(photo); 
+  }, [isManageMode]);
+
+  const handleMapLoadStatus = useCallback((isLoading: boolean) => {
+      setGlobalLoading(isLoading);
+  }, []);
+
   const handleNext = () => {
     if (!selectedPhoto) return;
     setSlideDirection('right');
@@ -365,7 +373,7 @@ const App: React.FC = () => {
       <main className={`mt-6 pb-12 ${containerPadding} ${containerMaxWidth} mx-auto min-h-screen`}>
         {viewMode === 'map' ? (
            <div className={`w-full h-[70vh] rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${isDark ? 'border-white/10' : 'border-black/5'}`}>
-             <MapView photos={photos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={(isLoading) => setGlobalLoading(isLoading)} />
+             <MapView photos={photos} theme={theme} onPhotoClick={handlePhotoClick} onMapLoadStatus={handleMapLoadStatus} />
            </div>
         ) : (
           <>
