@@ -64,6 +64,11 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   
+  // Selection Box State
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionRect, setSelectionRect] = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   // Batch fields
   const [batchCamera, setBatchCamera] = useState('');
   const [batchLens, setBatchLens] = useState('');
@@ -108,6 +113,20 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
     }
   }, [isOpen, activeTab]);
 
+  // GPS Sync Effect: Update Map when inputs change
+  useEffect(() => {
+     if (!mapInstance.current || !markerInstance.current) return;
+     const lat = parseFloat(batchLat);
+     const lng = parseFloat(batchLng);
+     if (!isNaN(lat) && !isNaN(lng)) {
+         const cur = markerInstance.current.getLatLng();
+         if (Math.abs(cur.lat - lat) > 0.0001 || Math.abs(cur.lng - lng) > 0.0001) {
+             markerInstance.current.setLatLng([lat, lng]);
+             mapInstance.current.setView([lat, lng], mapInstance.current.getZoom());
+         }
+     }
+  }, [batchLat, batchLng]);
+
   // Map Initialization for Batch Edit
   useEffect(() => {
     if (!isOpen || activeTab !== 'batch_edit') return;
@@ -116,6 +135,11 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
     const timer = setTimeout(() => {
       const L = (window as any).L;
       if (!L || !mapRef.current) return;
+
+      if (mapInstance.current) {
+          mapInstance.current.invalidateSize();
+          return;
+      }
 
       // Current Coords
       let center: [number, number] | null = null;
@@ -187,6 +211,16 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       } else {
           initMap([35.6895, 139.6917]);
       }
+      
+      // Add resize observer for stability
+      const resizeObserver = new ResizeObserver(() => {
+        if (mapInstance.current) {
+            mapInstance.current.invalidateSize();
+        }
+      });
+      resizeObserver.observe(mapRef.current);
+      
+      return () => resizeObserver.disconnect();
 
     }, 200);
 
@@ -296,6 +330,83 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
      if (selectedPhotos.size === recentPhotos.length) setSelectedPhotos(new Set());
      else setSelectedPhotos(new Set(recentPhotos.map(p => p.id)));
   };
+
+  // --- Box Selection Logic ---
+  
+  const handleGridMouseDown = (e: React.MouseEvent) => {
+    // Only start if clicking background (grid container or scroll container)
+    // Closest check prevents starting selection when clicking directly on a photo or its button
+    if ((e.target as HTMLElement).closest('[data-photo-item]')) return;
+    if (!scrollContainerRef.current) return;
+    
+    const rect = scrollContainerRef.current.getBoundingClientRect();
+    const scrollTop = scrollContainerRef.current.scrollTop;
+    
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top + scrollTop;
+    
+    setIsSelecting(true);
+    setSelectionRect({ startX, startY, currentX: startX, currentY: startY });
+  };
+
+  useEffect(() => {
+    if (!isSelecting) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!scrollContainerRef.current) return;
+      const rect = scrollContainerRef.current.getBoundingClientRect();
+      const scrollTop = scrollContainerRef.current.scrollTop;
+      
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top + scrollTop;
+      
+      setSelectionRect(prev => ({ ...prev, currentX, currentY }));
+    };
+
+    const handleMouseUp = () => {
+      if (!scrollContainerRef.current) return;
+      
+      // Calculate intersection
+      const left = Math.min(selectionRect.startX, selectionRect.currentX);
+      const top = Math.min(selectionRect.startY, selectionRect.currentY);
+      const width = Math.abs(selectionRect.currentX - selectionRect.startX);
+      const height = Math.abs(selectionRect.currentY - selectionRect.startY);
+
+      // Only select if box is large enough to be intentional
+      if (width > 5 || height > 5) {
+          const newSet = new Set(selectedPhotos);
+          
+          const items = scrollContainerRef.current.querySelectorAll('[data-photo-item]');
+          items.forEach((item) => {
+             const el = item as HTMLElement;
+             // Calculate element position relative to scroll container content
+             const itemLeft = el.offsetLeft;
+             const itemTop = el.offsetTop;
+             const itemW = el.offsetWidth;
+             const itemH = el.offsetHeight;
+             
+             // Check intersection
+             if (left < itemLeft + itemW && left + width > itemLeft &&
+                 top < itemTop + itemH && top + height > itemTop) {
+                 const id = el.getAttribute('data-photo-id');
+                 if(id) newSet.add(id);
+             }
+          });
+          setSelectedPhotos(newSet);
+      }
+      
+      setIsSelecting(false);
+      setSelectionRect({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isSelecting, selectionRect, selectedPhotos]);
 
   const handleBatchUpdate = async () => {
      if (selectedPhotos.size === 0) return;
@@ -513,11 +624,30 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                                  <Loader2 className="animate-spin opacity-50" />
                              </div>
                          ) : (
-                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4">
+                             <div 
+                                ref={scrollContainerRef}
+                                className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4 relative select-none"
+                                onMouseDown={handleGridMouseDown}
+                             >
+                                 {/* Selection Box Visual */}
+                                 {isSelecting && (
+                                    <div 
+                                      className="absolute z-50 border border-blue-500 bg-blue-500/20 pointer-events-none"
+                                      style={{
+                                          left: Math.min(selectionRect.startX, selectionRect.currentX),
+                                          top: Math.min(selectionRect.startY, selectionRect.currentY),
+                                          width: Math.abs(selectionRect.currentX - selectionRect.startX),
+                                          height: Math.abs(selectionRect.currentY - selectionRect.startY),
+                                      }}
+                                    />
+                                 )}
+
                                  <div className="grid grid-cols-3 md:grid-cols-4 gap-3 auto-rows-max w-full">
                                     {recentPhotos.map(photo => (
                                         <div 
                                         key={photo.id}
+                                        data-photo-item
+                                        data-photo-id={photo.id}
                                         onClick={() => togglePhotoSelection(photo.id)}
                                         className={`relative w-full aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`}
                                         >
