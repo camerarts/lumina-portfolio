@@ -24,7 +24,14 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
-  // 1. Group photos by location proximity (approx 20km radius)
+  // Refs for callbacks to avoid re-initializing effects when parents pass new function references
+  const onPhotoClickRef = useRef(onPhotoClick);
+  const onMapLoadStatusRef = useRef(onMapLoadStatus);
+
+  useEffect(() => { onPhotoClickRef.current = onPhotoClick; }, [onPhotoClick]);
+  useEffect(() => { onMapLoadStatusRef.current = onMapLoadStatus; }, [onMapLoadStatus]);
+
+  // 1. Group photos by location proximity
   const locationGroups = useMemo(() => {
     const groups: LocationGroup[] = [];
     const THRESHOLD = 0.2; // roughly 20km degrees diff
@@ -45,7 +52,6 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
 
       if (existingGroup) {
         existingGroup.photos.push(photo);
-        // Upgrade group name if current is unknown but new photo has a valid name
         if ((existingGroup.name === '未知地点' || existingGroup.name === 'Unknown') && locName !== '未知地点') {
             existingGroup.name = locName;
         }
@@ -63,14 +69,12 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
     return groups;
   }, [photos]);
 
-  // 2. Initialize and Update Map
+  // 2. Initialize Map (Run Once)
   useEffect(() => {
     if (!mapRef.current) return;
-
     const L = (window as any).L;
     if (!L) return;
 
-    // Init Map Instance if needed
     if (!mapInstance.current) {
       mapInstance.current = L.map(mapRef.current, {
         center: [25, 0],
@@ -82,61 +86,72 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
         scrollWheelZoom: true,
         fadeAnimation: true,
         markerZoomAnimation: true,
-        worldCopyJump: true // Enable markers to track across world copies
+        worldCopyJump: true 
       });
+      
+      // Force map resize to ensure it renders correctly after container transition
+      setTimeout(() => {
+          mapInstance.current?.invalidateSize();
+      }, 100);
     }
 
-    const map = mapInstance.current;
-
-    // CRITICAL FIX: Force map to recalculate size after a short delay to prevent partial rendering
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 100);
-
-    // Update Tile Layer based on theme
-    const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
-    map.eachLayer((layer: any) => {
-      if (layer.options && layer.options.subdomains) { 
-        map.removeLayer(layer);
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
       }
-    });
+    };
+  }, []);
+
+  // 3. Handle Tile Layer Updates (Only runs when Theme changes)
+  useEffect(() => {
+      if (!mapInstance.current) return;
+      const map = mapInstance.current;
+      const L = (window as any).L;
+
+      // Remove previous tile layers
+      map.eachLayer((layer: any) => {
+        if (layer.options && layer.options.subdomains) { 
+            map.removeLayer(layer);
+        }
+      });
     
-    const tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${layerStyle}/{z}/{x}/{y}{r}.png`, {
-      maxZoom: 20,
-      subdomains: 'abcd',
-    });
+      const layerStyle = theme === 'dark' ? 'dark_all' : 'light_all';
+      const tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${layerStyle}/{z}/{x}/{y}{r}.png`, {
+          maxZoom: 20,
+          subdomains: 'abcd',
+      });
 
-    // Add loading listeners
-    tileLayer.on('loading', () => {
-       onMapLoadStatus?.(true);
-    });
-    tileLayer.on('load', () => {
-       onMapLoadStatus?.(false);
-    });
+      // Use Ref for callbacks to avoid re-triggering this effect
+      tileLayer.on('loading', () => onMapLoadStatusRef.current?.(true));
+      tileLayer.on('load', () => onMapLoadStatusRef.current?.(false));
 
-    tileLayer.addTo(map);
+      tileLayer.addTo(map);
 
-    // 3. Render Markers with Popups
+  }, [theme]);
+
+  // 4. Handle Markers (Runs when Groups change or Theme changes for colors)
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    const map = mapInstance.current;
+    const L = (window as any).L;
+
     // Clear old markers
     markersRef.current.forEach(m => map.removeLayer(m));
     markersRef.current = [];
 
     locationGroups.forEach(group => {
-      // Create copies for continuous world wrapping (Center, East Copy, West Copy)
-      // This ensures markers appear on all "copies" of the world map when dragging endlessly
       const positions = [
           [group.latitude, group.longitude],
           [group.latitude, group.longitude + 360],
           [group.latitude, group.longitude - 360]
       ];
 
-      // Parse location string to create hierarchical title
       const rawLoc = group.name;
       let mainTitle = '';
       let subTitle = '';
 
       if (rawLoc === '未知地点' || rawLoc === 'Unknown') {
-         // Fallback to formatted coordinates if name is unknown
          const latDir = group.latitude >= 0 ? 'N' : 'S';
          const lngDir = group.longitude >= 0 ? 'E' : 'W';
          mainTitle = `${Math.abs(group.latitude).toFixed(2)}°${latDir}, ${Math.abs(group.longitude).toFixed(2)}°${lngDir}`;
@@ -148,7 +163,6 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       }
 
       positions.forEach(pos => {
-        // Create a clean circle marker
         const marker = L.circleMarker(pos, {
           radius: 5, 
           fillColor: theme === 'dark' ? '#fff' : '#000',
@@ -158,10 +172,10 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
           fillOpacity: 0.8
         }).addTo(map);
 
-        // Create Popup Content using React Portal Logic
         const popupDiv = document.createElement('div');
         const root = createRoot(popupDiv);
         
+        // Render Popup
         root.render(
           <div className={`w-64 rounded-xl shadow-xl overflow-hidden backdrop-blur-md border animate-fade-in
              ${theme === 'dark' ? 'bg-black/80 border-white/10 text-white' : 'bg-white/90 border-black/5 text-black'}
@@ -181,12 +195,12 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
                  <div 
                    key={photo.id}
                    onClick={(e) => {
-                     e.stopPropagation(); // prevent map click
-                     onPhotoClick(photo);
+                     e.stopPropagation();
+                     // Use Ref callback
+                     onPhotoClickRef.current?.(photo);
                    }}
                    className="aspect-square rounded-md overflow-hidden cursor-pointer relative group/item"
                  >
-                   {/* Optimization: Use Small URL (400px) */}
                    <img 
                      src={photo.urls?.small || photo.url} 
                      alt={photo.title} 
@@ -207,7 +221,6 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
           offset: [0, -4]
         });
 
-        // Marker interactions
         marker.on('mouseover', function (this: any) {
           this.setStyle({ fillOpacity: 1, radius: 7 }); 
           this.openPopup();
@@ -221,17 +234,7 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       });
     });
 
-  }, [theme, locationGroups, onPhotoClick, onMapLoadStatus]); 
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      if (mapInstance.current) {
-        mapInstance.current.remove();
-        mapInstance.current = null;
-      }
-    };
-  }, []);
+  }, [locationGroups, theme]); 
 
   return (
     <div className="w-full h-full animate-fade-in relative z-0 group">
