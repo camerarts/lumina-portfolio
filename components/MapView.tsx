@@ -90,12 +90,22 @@ export const MapView: React.FC<MapViewProps> = ({ photos, theme, onPhotoClick, o
       });
       
       // Force map resize to ensure it renders correctly after container transition
+      // Increased to 850ms to exceed standard CSS transitions (usually 0.3s - 0.8s)
       setTimeout(() => {
           mapInstance.current?.invalidateSize();
-      }, 100);
+      }, 850);
     }
 
+    // Add ResizeObserver to handle container size changes (e.g. window resize, layout shifts)
+    const resizeObserver = new ResizeObserver(() => {
+        if (mapInstance.current) {
+            mapInstance.current.invalidateSize();
+        }
+    });
+    resizeObserver.observe(mapRef.current);
+
     return () => {
+      resizeObserver.disconnect();
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
