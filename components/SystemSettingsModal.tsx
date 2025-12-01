@@ -12,6 +12,7 @@ interface SystemSettingsModalProps {
   onUpdateCategories: (newCats: string[]) => void;
   theme: Theme;
   token: string;
+  onRefresh?: () => void;
 }
 
 type Tab = 'categories' | 'batch_edit' | 'menu_presets';
@@ -39,7 +40,7 @@ const fetchAddressFromCoords = async (lat: number, lng: number): Promise<string>
 }
 
 export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({ 
-  isOpen, onClose, categories = [], onUpdateCategories, theme, token 
+  isOpen, onClose, categories = [], onUpdateCategories, theme, token, onRefresh
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('categories');
   const isDark = theme === 'dark';
@@ -66,7 +67,9 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   
   // Selection Box State
   const [isSelecting, setIsSelecting] = useState(false);
-  const [selectionRect, setSelectionRect] = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
+  const [dragStart, setDragStart] = useState<{x: number, y: number} | null>(null);
+  const [dragCurrent, setDragCurrent] = useState<{x: number, y: number} | null>(null);
+  const [initialSelection, setInitialSelection] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Batch fields
@@ -331,72 +334,49 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
      else setSelectedPhotos(new Set(recentPhotos.map(p => p.id)));
   };
 
-  // --- Box Selection Logic ---
+  // --- Live Drag Selection Logic ---
   
   const handleGridMouseDown = (e: React.MouseEvent) => {
-    // Only start if clicking background (grid container or scroll container)
-    // Closest check prevents starting selection when clicking directly on a photo or its button
     if ((e.target as HTMLElement).closest('[data-photo-item]')) return;
-    if (!scrollContainerRef.current) return;
     
-    const rect = scrollContainerRef.current.getBoundingClientRect();
-    const scrollTop = scrollContainerRef.current.scrollTop;
-    
-    const startX = e.clientX - rect.left;
-    const startY = e.clientY - rect.top + scrollTop;
-    
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setDragCurrent({ x: e.clientX, y: e.clientY });
     setIsSelecting(true);
-    setSelectionRect({ startX, startY, currentX: startX, currentY: startY });
+    setInitialSelection(new Set(selectedPhotos));
   };
 
   useEffect(() => {
-    if (!isSelecting) return;
+    if (!isSelecting || !dragStart) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!scrollContainerRef.current) return;
-      const rect = scrollContainerRef.current.getBoundingClientRect();
-      const scrollTop = scrollContainerRef.current.scrollTop;
+      setDragCurrent({ x: e.clientX, y: e.clientY });
+
+      // Box logic
+      const boxLeft = Math.min(dragStart.x, e.clientX);
+      const boxTop = Math.min(dragStart.y, e.clientY);
+      const boxRight = Math.max(dragStart.x, e.clientX);
+      const boxBottom = Math.max(dragStart.y, e.clientY);
+
+      const newSelection = new Set(initialSelection);
       
-      const currentX = e.clientX - rect.left;
-      const currentY = e.clientY - rect.top + scrollTop;
-      
-      setSelectionRect(prev => ({ ...prev, currentX, currentY }));
+      const items = scrollContainerRef.current?.querySelectorAll('[data-photo-item]');
+      items?.forEach(el => {
+          const rect = el.getBoundingClientRect();
+          // Check Intersection
+          if (rect.left < boxRight && rect.right > boxLeft && 
+              rect.top < boxBottom && rect.bottom > boxTop) {
+              const id = el.getAttribute('data-photo-id');
+              if(id) newSelection.add(id);
+          }
+      });
+      setSelectedPhotos(newSelection);
     };
 
     const handleMouseUp = () => {
-      if (!scrollContainerRef.current) return;
-      
-      // Calculate intersection
-      const left = Math.min(selectionRect.startX, selectionRect.currentX);
-      const top = Math.min(selectionRect.startY, selectionRect.currentY);
-      const width = Math.abs(selectionRect.currentX - selectionRect.startX);
-      const height = Math.abs(selectionRect.currentY - selectionRect.startY);
-
-      // Only select if box is large enough to be intentional
-      if (width > 5 || height > 5) {
-          const newSet = new Set(selectedPhotos);
-          
-          const items = scrollContainerRef.current.querySelectorAll('[data-photo-item]');
-          items.forEach((item) => {
-             const el = item as HTMLElement;
-             // Calculate element position relative to scroll container content
-             const itemLeft = el.offsetLeft;
-             const itemTop = el.offsetTop;
-             const itemW = el.offsetWidth;
-             const itemH = el.offsetHeight;
-             
-             // Check intersection
-             if (left < itemLeft + itemW && left + width > itemLeft &&
-                 top < itemTop + itemH && top + height > itemTop) {
-                 const id = el.getAttribute('data-photo-id');
-                 if(id) newSet.add(id);
-             }
-          });
-          setSelectedPhotos(newSet);
-      }
-      
       setIsSelecting(false);
-      setSelectionRect({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
+      setDragStart(null);
+      setDragCurrent(null);
+      setInitialSelection(new Set());
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -406,7 +386,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isSelecting, selectionRect, selectedPhotos]);
+  }, [isSelecting, dragStart, initialSelection]);
 
   const handleBatchUpdate = async () => {
      if (selectedPhotos.size === 0) return;
@@ -443,6 +423,10 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
          });
          setRecentPhotos(updatedList);
          setSelectedPhotos(new Set());
+         
+         // Notify parent app to refresh view
+         if (onRefresh) onRefresh();
+
      } else {
          alert("更新失败，请重试");
      }
@@ -611,7 +595,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
             {activeTab === 'batch_edit' && (
                 <div className="h-full flex flex-col md:flex-row gap-6 overflow-hidden">
                     {/* Left: Selection Grid */}
-                    <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-transparent">
+                    <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-transparent relative">
                          <div className="flex justify-between items-center mb-2 flex-shrink-0">
                              <h3 className={`text-xs uppercase tracking-wider ${textSecondary}`}>最近上传 ({recentPhotos.length})</h3>
                              <button onClick={selectAll} className={`text-xs underline ${textSecondary}`}>
@@ -629,27 +613,29 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                                 className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4 relative select-none"
                                 onMouseDown={handleGridMouseDown}
                              >
-                                 {/* Selection Box Visual */}
-                                 {isSelecting && (
-                                    <div 
-                                      className="absolute z-50 border border-blue-500 bg-blue-500/20 pointer-events-none"
-                                      style={{
-                                          left: Math.min(selectionRect.startX, selectionRect.currentX),
-                                          top: Math.min(selectionRect.startY, selectionRect.currentY),
-                                          width: Math.abs(selectionRect.currentX - selectionRect.startX),
-                                          height: Math.abs(selectionRect.currentY - selectionRect.startY),
-                                      }}
-                                    />
+                                 {/* Visual Selection Box (Portal or Absolute over content) */}
+                                 {isSelecting && dragStart && dragCurrent && (
+                                     <div 
+                                        className="fixed z-[9999] border-2 border-blue-500 bg-blue-500/20 pointer-events-none"
+                                        style={{
+                                            left: Math.min(dragStart.x, dragCurrent.x),
+                                            top: Math.min(dragStart.y, dragCurrent.y),
+                                            width: Math.abs(dragCurrent.x - dragStart.x),
+                                            height: Math.abs(dragCurrent.y - dragStart.y),
+                                        }}
+                                     />
                                  )}
 
-                                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 auto-rows-max w-full">
+                                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 auto-rows-max w-full content-start">
                                     {recentPhotos.map(photo => (
                                         <div 
                                         key={photo.id}
                                         data-photo-item
                                         data-photo-id={photo.id}
                                         onClick={() => togglePhotoSelection(photo.id)}
-                                        className={`relative w-full aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                                        className={`relative w-full aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all flex-none 
+                                            ${selectedPhotos.has(photo.id) ? 'border-blue-500 opacity-100 scale-95' : 'border-transparent opacity-60 hover:opacity-100'}
+                                        `}
                                         >
                                             <img src={photo.urls?.small || photo.url} alt="" className="absolute inset-0 w-full h-full object-cover block" />
                                             {selectedPhotos.has(photo.id) && (
