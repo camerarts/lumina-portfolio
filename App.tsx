@@ -247,6 +247,10 @@ const App: React.FC = () => {
     setPhotos(prev => prev.filter(p => p.id !== photoId));
   };
 
+  const handleRefreshPhotos = useCallback(() => {
+      fetchPhotos(1, true);
+  }, [fetchPhotos]);
+
   // Memoize handlers to prevent re-renders in MapView
   const handlePhotoClick = useCallback((photo: Photo) => { 
       if (!isManageMode) setSelectedPhoto(photo); 
@@ -447,7 +451,15 @@ const App: React.FC = () => {
       
       <UploadModal isOpen={isUploadOpen} onClose={() => { setIsUploadOpen(false); setPhotoToEdit(null); }} onUpload={handleUpdatePhoto} theme={theme} editingPhoto={photoToEdit} token={adminToken} categories={customCategories} />
       <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLoginSuccess={handleLoginSuccess} theme={theme} />
-      <SystemSettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} categories={customCategories} onUpdateCategories={setCustomCategories} theme={theme} token={adminToken} />
+      <SystemSettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        categories={customCategories} 
+        onUpdateCategories={setCustomCategories} 
+        theme={theme} 
+        token={adminToken} 
+        onRefresh={handleRefreshPhotos}
+      />
     </div>
   );
 };
